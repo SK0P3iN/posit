@@ -28,6 +28,9 @@ model Organization {
   github              GitHub[]
   Integration         Integration[]
   media               Media[]
+  mediaFolders        MediaFolder[]
+  mediaUsageHistory   MediaUsageHistory[]
+  inboxItems          InboxItem[]
   buyerOrganization   MessagesGroup[]
   notifications       Notifications[]
   plugs               Plugs[]
@@ -212,6 +215,7 @@ model Media {
   originalName       String?
   path               String
   organizationId     String
+  folderId           String?
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
   deletedAt          DateTime?
@@ -221,6 +225,8 @@ model Media {
   alt                String?
   thumbnailTimestamp Int?
   organization       Organization        @relation(fields: [organizationId], references: [id])
+  folder             MediaFolder?        @relation(fields: [folderId], references: [id])
+  usageHistory       MediaUsageHistory[]
   agencies           SocialMediaAgency[]
   userPicture        User[]
   oauthApps          OAuthApp[]
@@ -228,6 +234,79 @@ model Media {
   @@index([name])
   @@index([organizationId])
   @@index([type])
+  @@index([deletedAt])
+  @@index([folderId])
+}
+
+model MediaFolder {
+  id             String        @id @default(uuid())
+  name           String
+  organizationId String
+  parentId       String?
+  deletedAt      DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  organization   Organization  @relation(fields: [organizationId], references: [id])
+  parent         MediaFolder?  @relation("MediaFolderParent", fields: [parentId], references: [id])
+  children       MediaFolder[] @relation("MediaFolderParent")
+  media          Media[]
+
+  @@index([organizationId])
+  @@index([deletedAt])
+  @@index([parentId])
+}
+
+model MediaUsageHistory {
+  id             String       @id @default(uuid())
+  organizationId String
+  mediaId        String
+  postId         String?
+  event          String
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  media          Media        @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([mediaId])
+  @@index([createdAt])
+}
+
+enum InboxItemType {
+  COMMENT
+  MENTION
+  DM
+}
+
+model InboxItem {
+  id              String        @id @default(uuid())
+  organizationId  String
+  integrationId   String
+  type            InboxItemType
+  remoteId        String
+  threadKey       String?
+  authorName      String?
+  authorId        String?
+  authorPicture   String?
+  body            String
+  replyCapable    Boolean       @default(false)
+  remoteUrl       String?
+  readAt          DateTime?
+  remoteCreatedAt DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  deletedAt       DateTime?
+  organization    Organization  @relation(fields: [organizationId], references: [id])
+  integration     Integration   @relation(fields: [integrationId], references: [id])
+
+  @@unique([integrationId, type, remoteId])
+  @@index([organizationId])
+  @@index([organizationId, readAt])
+  @@index([organizationId, type])
+  @@index([integrationId])
+  @@index([threadKey])
+  @@index([deletedAt])
+  @@index([remoteCreatedAt])
+  @@index([createdAt])
 }
 
 model SocialMediaAgency {
@@ -341,6 +420,7 @@ model Integration {
   orderItems            OrderItems[]
   plugs                 Plugs[]
   posts                 Post[]
+  inboxItems            InboxItem[]
 
   @@unique([organizationId, internalId])
   @@index([rootInternalId])
@@ -413,6 +493,7 @@ model Post {
   lastMessageId              String?
   intervalInDays             Int?
   error                      String?
+  mediaMissing               Boolean                   @default(false)
   createdAt                  DateTime                  @default(now())
   updatedAt                  DateTime                  @updatedAt
   deletedAt                  DateTime?
@@ -443,6 +524,7 @@ model Post {
   @@index([updatedAt])
   @@index([releaseURL])
   @@index([integrationId])
+  @@index([mediaMissing])
 }
 
 model Notifications {
