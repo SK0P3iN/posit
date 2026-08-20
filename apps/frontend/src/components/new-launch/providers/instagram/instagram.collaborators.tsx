@@ -1,29 +1,11 @@
 'use client';
 
-import {
-  PostComment,
-  withProvider,
-} from '@gitroom/frontend/components/new-launch/providers/high.order.provider';
 import { FC } from 'react';
 import { Select } from '@gitroom/react/form/select';
 import { Checkbox } from '@gitroom/react/form/checkbox';
 import { useSettings } from '@gitroom/frontend/components/launches/helpers/use.values';
-import { InstagramDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/instagram.dto';
 import { InstagramCollaboratorsTags } from '@gitroom/frontend/components/new-launch/providers/instagram/instagram.tags';
-import { InstagramAudioSelector } from '@gitroom/frontend/components/new-launch/providers/instagram/instagram.audio';
-import { useIntegration } from '@gitroom/frontend/components/launches/helpers/use.integration';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
-import { InstagramPreview } from '@gitroom/frontend/components/new-launch/providers/instagram/instagram.preview';
-const postType = [
-  {
-    value: 'post',
-    label: 'Post / Reel',
-  },
-  {
-    value: 'story',
-    label: 'Story',
-  },
-];
 
 const graduationStrategies = [
   {
@@ -35,88 +17,61 @@ const graduationStrategies = [
     label: 'Auto (based on performance)',
   },
 ];
-const InstagramCollaborators: FC<{
-  values?: any;
-}> = (props) => {
+
+// Collaborators apply to any non-Story post (InstagramProvider.postPending
+// sends `collaborators` whenever `!isStory`, not only for Reels) - composed
+// by instagram.provider.tsx wherever post_type isn't Story.
+export const InstagramCollaboratorsTagsField: FC = () => {
   const t = useT();
-  const { watch, register, formState, control } = useSettings();
-  const { integration } = useIntegration();
-  const postCurrentType = watch('post_type');
-  const isTrialReel = watch('is_trial_reel');
-  // The Audio API is only available with Facebook Login, not Instagram Login
-  const supportsAudio = integration?.identifier === 'instagram';
+  const { register } = useSettings();
+
   return (
-    <>
-      <Select
-        label="Post Type"
-        {...register('post_type', {
-          value: 'post',
-        })}
-      >
-        <option value="">{t('select_post_type', 'Select Post Type...')}</option>
-        {postType.map((item) => (
-          <option key={item.value} value={item.value}>
-            {item.label}
-          </option>
-        ))}
-      </Select>
-
-      {postCurrentType !== 'story' && (
-        <InstagramCollaboratorsTags
-          label="Collaborators (max 3) - accounts can't be private"
-          {...register('collaborators', {
-            value: [],
-          })}
-        />
+    <InstagramCollaboratorsTags
+      label={t(
+        'instagram_collaborators_label',
+        "Collaborators (max 3) - accounts can't be private"
       )}
-
-      {postCurrentType === 'post' && (
-        <div className="mt-[18px]">
-          <InstagramAudioSelector
-            label={t(
-              'instagram_audio_label',
-              'Audio (Reels only - single video)'
-            )}
-            disabled={!supportsAudio}
-            {...register('audio')}
-          />
-        </div>
-      )}
-
-      {postCurrentType === 'post' && (
-        <div className="mt-[18px] flex flex-col gap-[18px]">
-          <Checkbox
-            {...register('is_trial_reel', {
-              value: false,
-            })}
-            label={t('trial_reel', 'Trial Reel (share only to non-followers first)')}
-          />
-
-          {isTrialReel && (
-            <Select
-              label="Graduation Strategy"
-              {...register('graduation_strategy', {
-                value: 'MANUAL',
-              })}
-            >
-              {graduationStrategies.map((item) => (
-                <option key={item.value} value={item.value}>
-                  {item.label}
-                </option>
-              ))}
-            </Select>
-          )}
-        </div>
-      )}
-    </>
+      {...register('collaborators', {
+        value: [],
+      })}
+    />
   );
 };
-export default withProvider<InstagramDto>({
-  postComment: PostComment.COMMENT,
-  minimumCharacters: [],
-  SettingsComponent: InstagramCollaborators,
-  CustomPreviewComponent: InstagramPreview,
-  dto: InstagramDto,
-  maximumCharacters: 2200,
-  comments: 'no-media'
-});
+
+// Reel-only fields (R1): Trial Reel toggle and its graduation strategy -
+// Meta requires media_type=REELS for trial_params, so unlike collaborators
+// these stay scoped to instagram.provider.tsx's Reel branch only.
+export const InstagramTrialReelFields: FC = () => {
+  const t = useT();
+  const { watch, register } = useSettings();
+  const isTrialReel = watch('is_trial_reel');
+
+  return (
+    <div className="flex flex-col gap-[18px]">
+      <Checkbox
+        {...register('is_trial_reel', {
+          value: false,
+        })}
+        label={t(
+          'trial_reel',
+          'Trial Reel (share only to non-followers first)'
+        )}
+      />
+
+      {isTrialReel && (
+        <Select
+          label={t('graduation_strategy', 'Graduation Strategy')}
+          {...register('graduation_strategy', {
+            value: 'MANUAL',
+          })}
+        >
+          {graduationStrategies.map((item) => (
+            <option key={item.value} value={item.value}>
+              {item.label}
+            </option>
+          ))}
+        </Select>
+      )}
+    </div>
+  );
+};
