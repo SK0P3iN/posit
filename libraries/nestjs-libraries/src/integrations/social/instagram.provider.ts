@@ -30,7 +30,8 @@ export class InstagramProvider
   identifier = 'instagram';
   name = 'Instagram\n(Facebook Business)';
   isBetweenSteps = true;
-  toolTip = 'Instagram must be business and connected to a Facebook page';
+  toolTip =
+    'Your Facebook page selection is shared across all your Meta channels, check all relevant pages\nInstagram must be business and connected to a Facebook page, check this page too';
   scopes = [
     'instagram_basic',
     'pages_show_list',
@@ -321,11 +322,11 @@ export class InstagramProvider
       };
     }
 
-    if (body.indexOf('190,') > -1) {
+    if (/"code":\s*190\b/.test(body)) {
       return {
-        type: 'bad-body' as const,
+        type: 'refresh-token' as const,
         value:
-          'The account is missing some permissions to perform this action, please re-add the account and allow all permissions',
+          'The Instagram access token is invalid, please reconnect the channel',
       };
     }
 
@@ -423,6 +424,9 @@ export class InstagramProvider
           `${process.env.FRONTEND_URL}/integrations/social/instagram`
         )}` +
         `&state=${state}` +
+        // Re-prompt permissions/assets the user previously declined, so a
+        // bad page grant can be repaired by reconnecting
+        `&auth_type=rerequest` +
         `&scope=${encodeURIComponent(this.scopes.join(','))}`,
       codeVerifier: makeId(10),
       state,
@@ -546,21 +550,36 @@ export class InstagramProvider
       // Business Manager API not available for all users
     }
 
-    const onlyConnectedAccounts = await Promise.all(
-      allFacebookPages
-        .filter((f: any) => f.instagram_business_account)
-        .map(async (p: any) => {
-          return {
-            pageId: p.id,
-            ...(await (
+    const onlyConnectedAccounts = (
+      await Promise.all(
+        allFacebookPages
+          .filter((f: any) => f.instagram_business_account)
+          .map(async (p: any) => {
+            // Pages without an access_token were never granted to the app
+            // in the OAuth dialog — selecting them would store a broken
+            // "undefined___..." token
+            const { access_token } = await (
               await fetch(
-                `https://graph.facebook.com/v20.0/${p.instagram_business_account.id}?fields=name,profile_picture_url&access_token=${accessToken}`
+                `https://graph.facebook.com/v20.0/${p.id}?fields=access_token&access_token=${accessToken}`
               )
-            ).json()),
-            id: p.instagram_business_account.id,
-          };
-        })
-    );
+            ).json();
+
+            if (!access_token) {
+              return null;
+            }
+
+            return {
+              pageId: p.id,
+              ...(await (
+                await fetch(
+                  `https://graph.facebook.com/v20.0/${p.instagram_business_account.id}?fields=name,profile_picture_url&access_token=${accessToken}`
+                )
+              ).json()),
+              id: p.instagram_business_account.id,
+            };
+          })
+      )
+    ).filter(Boolean);
 
     return onlyConnectedAccounts.map((p: any) => ({
       pageId: p.pageId,
@@ -650,10 +669,34 @@ export class InstagramProvider
     token: string,
     postDetails: PostDetails<InstagramDto>[],
     integration: Integration,
+    progress?: (response: PostResponse) => Promise<unknown> | unknown,
     type = 'graph.facebook.com'
   ): Promise<PostResponse[]> {
     const [accessToken] = token.split('___');
     const [firstPost] = postDetails;
+
+    // Resume a previous attempt that created containers / carousel but died
+    // before finalize confirmed the publish — never create new media.
+    if (firstPost?.inFlight) {
+      try {
+        const pendingData = JSON.parse(firstPost.inFlight);
+        return [
+          {
+            id: firstPost.id,
+            postId: '',
+            releaseURL: '',
+            status: 'pending',
+            pendingData: {
+              ...pendingData,
+              postDbId: firstPost.id,
+            },
+          },
+        ];
+      } catch {
+        // Corrupt marker — fall through to a fresh create
+      }
+    }
+
     const isStory = firstPost.settings.post_type === 'story';
     const isTrialReel = this.assetBoolean(firstPost.settings.is_trial_reel);
     const medias = await Promise.all(
@@ -726,7 +769,8 @@ export class InstagramProvider
             `https://${type}/v20.0/${id}/media?${mediaType}${isCarousel}${collaborators}${trialParams}${audioConfiguration}&access_token=${accessToken}${caption}`,
             {
               method: 'POST',
-            }
+            },
+            'instagram-create-media'
           )
         ).json();
 
@@ -737,23 +781,35 @@ export class InstagramProvider
     // Containers are invisible until media_publish runs: the processing wait
     // and the publish itself move to checkPostStatus / finalizePost so a
     // failure there can never re-create (and re-publish) the whole post.
+    const pendingData = {
+      type,
+      postType:
+        isStory && medias.length > 1
+          ? 'stories'
+          : medias.length === 1
+          ? 'single'
+          : 'carousel',
+      containers: medias,
+      message: firstPost?.message || '',
+      postDbId: firstPost.id,
+    };
+
+    // Publish boundary for the container-create step: a crash/retry after this
+    // must resume these containers, not create new ones.
+    await progress?.({
+      id: firstPost.id,
+      postId: JSON.stringify(pendingData),
+      releaseURL: '',
+      status: 'in-progress',
+    });
+
     return [
       {
         id: firstPost.id,
         postId: '',
         releaseURL: '',
         status: 'pending',
-        pendingData: {
-          type,
-          postType:
-            isStory && medias.length > 1
-              ? 'stories'
-              : medias.length === 1
-              ? 'single'
-              : 'carousel',
-          containers: medias,
-          message: firstPost?.message || '',
-        },
+        pendingData,
       },
     ];
   }
@@ -934,6 +990,7 @@ export class InstagramProvider
     token: string,
     postDetails: PostDetails<InstagramDto>[],
     integration: Integration,
+    progress?: (response: PostResponse) => Promise<unknown> | unknown,
     type = 'graph.facebook.com'
   ): Promise<PostResponse[]> {
     const [firstPost] = postDetails;
@@ -942,6 +999,7 @@ export class InstagramProvider
       token,
       postDetails,
       integration,
+      progress,
       type
     );
 
@@ -976,6 +1034,12 @@ export class InstagramProvider
           : check;
 
       if (result.status === 'completed') {
+        await progress?.({
+          id: firstPost.id,
+          postId: result.postId,
+          releaseURL: result.releaseURL,
+          status: 'success',
+        });
         return [
           {
             id: firstPost.id,
@@ -989,6 +1053,64 @@ export class InstagramProvider
       pendingData = result.pendingData;
       await timer(30000);
     }
+  }
+
+  override inboxCapabilities() {
+    return { comments: true, mentions: false, dms: false };
+  }
+
+  override async fetchInboxItems(
+    token: string,
+    integration: Integration,
+    type = 'graph.facebook.com'
+  ) {
+    const [accessToken] = token.split('___');
+    const media = await (
+      await this.fetch(
+        `https://${type}/v20.0/${integration.internalId}/media?fields=id,permalink,comments.limit(20){id,text,username,timestamp,from}&limit=10&access_token=${accessToken}`
+      )
+    ).json();
+
+    const items = [];
+    for (const post of media?.data || []) {
+      for (const comment of post?.comments?.data || []) {
+        items.push({
+          type: 'COMMENT' as const,
+          remoteId: String(comment.id),
+          threadKey: String(post.id),
+          authorName: comment.username || comment.from?.username || null,
+          authorId: comment.from?.id || null,
+          body: comment.text || '',
+          replyCapable: true,
+          remoteUrl: post.permalink || null,
+          remoteCreatedAt: comment.timestamp || null,
+        });
+      }
+    }
+    return items;
+  }
+
+  override async replyToInboxItem(
+    token: string,
+    item: {
+      type: 'COMMENT' | 'MENTION' | 'DM';
+      remoteId: string;
+      threadKey?: string | null;
+    },
+    message: string,
+    _integration: Integration,
+    type = 'graph.facebook.com'
+  ) {
+    const [accessToken] = token.split('___');
+    const { id } = await (
+      await this.fetch(
+        `https://${type}/v20.0/${item.remoteId}/replies?message=${encodeURIComponent(
+          message
+        )}&access_token=${accessToken}`,
+        { method: 'POST' }
+      )
+    ).json();
+    return { remoteId: String(id) };
   }
 
   async comment(
