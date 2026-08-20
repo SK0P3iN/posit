@@ -255,6 +255,114 @@ describe('InstagramProvider - Graph API version (R13/U1)', () => {
       expectOnlyGraphApiVersion(calledUrls);
     });
 
+    it('checkPostStatus keeps polling (pending) while the container is IN_PROGRESS', async () => {
+      fetchMock.mockImplementation(async (url: any) => {
+        calledUrls.push(String(url));
+        return jsonResponse({ status_code: 'IN_PROGRESS', status: 'in progress' });
+      });
+
+      const result = await provider.checkPostStatus(
+        'access___user',
+        {
+          type: 'graph.facebook.com',
+          postType: 'single',
+          containers: ['container-1'],
+        },
+        {} as Integration
+      );
+
+      expect(result).toEqual({
+        status: 'pending',
+        pendingData: {
+          type: 'graph.facebook.com',
+          postType: 'single',
+          containers: ['container-1'],
+        },
+      });
+    });
+
+    // R14: an unrecognized status code must never be silently treated as
+    // ready - only an exact FINISHED (or already-handled PUBLISHED) match
+    // may resolve the container to 'ready'/'completed'.
+    it('checkPostStatus does not resolve to ready on an unrecognized status code', async () => {
+      fetchMock.mockImplementation(async (url: any) => {
+        calledUrls.push(String(url));
+        return jsonResponse({ status_code: 'SOME_UNKNOWN_STATUS', status: 'ok' });
+      });
+
+      const result = await provider.checkPostStatus(
+        'access___user',
+        {
+          type: 'graph.facebook.com',
+          postType: 'single',
+          containers: ['container-1'],
+        },
+        {} as Integration
+      );
+
+      expect(result.status).not.toBe('ready');
+      expect(result.status).toBe('pending');
+    });
+
+    it('checkPostStatus does not resolve to ready on an unrecognized status code (carousel branch)', async () => {
+      fetchMock.mockImplementation(async (url: any) => {
+        calledUrls.push(String(url));
+        return jsonResponse({ status_code: 'SOME_UNKNOWN_STATUS', status: 'ok' });
+      });
+
+      const result = await provider.checkPostStatus(
+        'access___user',
+        {
+          type: 'graph.facebook.com',
+          postType: 'carousel',
+          containers: ['container-1', 'container-2'],
+          carouselId: 'carousel-1',
+        },
+        {} as Integration
+      );
+
+      expect(result.status).not.toBe('ready');
+      expect(result.status).toBe('pending');
+    });
+
+    it('checkPostStatus/igContainerStatus still throws on ERROR exactly as before', async () => {
+      fetchMock.mockImplementation(async (url: any) => {
+        calledUrls.push(String(url));
+        return jsonResponse({ status_code: 'ERROR', status: 'Media could not be processed' });
+      });
+
+      await expect(
+        provider.checkPostStatus(
+          'access___user',
+          {
+            type: 'graph.facebook.com',
+            postType: 'single',
+            containers: ['container-1'],
+          },
+          {} as Integration
+        )
+      ).rejects.toThrow();
+    });
+
+    it('checkPostStatus/igContainerStatus still throws on EXPIRED exactly as before', async () => {
+      fetchMock.mockImplementation(async (url: any) => {
+        calledUrls.push(String(url));
+        return jsonResponse({ status_code: 'EXPIRED', status: 'Container expired' });
+      });
+
+      await expect(
+        provider.checkPostStatus(
+          'access___user',
+          {
+            type: 'graph.facebook.com',
+            postType: 'single',
+            containers: ['container-1'],
+          },
+          {} as Integration
+        )
+      ).rejects.toThrow();
+    });
+
     it('finalizePost calls media_publish then igPermalink on the shared version', async () => {
       let call = 0;
       fetchMock.mockImplementation(async (url: any) => {

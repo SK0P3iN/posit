@@ -856,6 +856,13 @@ export class InstagramProvider
         };
       }
 
+      // only an exact FINISHED match means the container is ready to publish -
+      // an unexpected/unrecognized status code is never silently treated as
+      // ready, it just keeps polling
+      if (status !== 'FINISHED') {
+        return { status: 'pending', pendingData };
+      }
+
       return { status: 'ready', pendingData };
     }
 
@@ -880,6 +887,11 @@ export class InstagramProvider
             releaseURL: `https://www.instagram.com/${integration.profile}`,
           };
         }
+      } else if (status !== 'FINISHED') {
+        // only an exact FINISHED (or the already-handled PUBLISHED) match
+        // moves a container towards ready - an unexpected status code is
+        // never silently treated as ready, it just keeps polling
+        return { status: 'pending', pendingData };
       }
     }
 
