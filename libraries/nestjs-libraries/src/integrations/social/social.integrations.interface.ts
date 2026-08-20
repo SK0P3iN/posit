@@ -86,14 +86,23 @@ export interface ISocialMediaIntegration {
     id: string,
     accessToken: string,
     postDetails: PostDetails[],
-    integration: Integration
+    integration: Integration,
+    // Called the moment the platform confirms a publish, so the caller can
+    // persist the remote id before any later step can fail — a retry after
+    // a post-publish failure must not publish a duplicate.
+    // A provider may also report an *unconfirmed* publish with
+    // status 'in-progress' (postId = resume hint): the publish has been
+    // initiated but may still fail, so the caller must only record it as a
+    // resume hint, never as a completed publish.
+    progress?: (response: PostResponse) => Promise<unknown> | unknown
   ): Promise<PostResponse[]>; // Schedules a new post
 
   postPending?(
     id: string,
     accessToken: string,
     postDetails: PostDetails[],
-    integration: Integration
+    integration: Integration,
+    progress?: (response: PostResponse) => Promise<unknown> | unknown
   ): Promise<PostResponse[]>; // Like `post`, but may return a `pending` response the workflow resolves via checkPostStatus / finalizePost
 
   comment?(
@@ -110,7 +119,7 @@ export type PostResponse = {
   id: string; // The db internal id of the post
   postId: string; // The ID of the scheduled post returned by the platform
   releaseURL: string; // The URL of the post on the platform
-  status: string; // Status of the operation or initial post status, 'pending' means the workflow must poll checkPostStatus
+  status: string; // Status of the operation or initial post status, 'pending' means the workflow must poll checkPostStatus; 'in-progress' is a resume hint only
   pendingData?: any; // Opaque provider state used by checkPostStatus / finalizePost, never inspected by generic code
 };
 
@@ -136,6 +145,11 @@ export type PostDetails<T = any> = {
   settings: T;
   media?: MediaContent[];
   poll?: PollDetails;
+  // The provider publish id / pending blob of a publish that is already in
+  // flight for this post (from a previous attempt that died mid-poll). When
+  // set, a provider that supports it should resume observing that publish
+  // instead of initiating a new one.
+  inFlight?: string;
 };
 
 export type PollDetails = {
@@ -220,4 +234,42 @@ export interface SocialProvider
     accessToken: string,
     data: any
   ): Promise<FetchPageInformationResult>;
+  /** Optional social-inbox capabilities for R13 honesty in the UI. */
+  inboxCapabilities?(): InboxCapabilities;
+  fetchInboxItems?(
+    accessToken: string,
+    integration: Integration
+  ): Promise<FetchedInboxItem[]>;
+  replyToInboxItem?(
+    accessToken: string,
+    item: InboxReplyTarget,
+    message: string,
+    integration: Integration
+  ): Promise<{ remoteId: string }>;
 }
+
+export type InboxCapabilities = {
+  comments: boolean;
+  mentions: boolean;
+  dms: boolean;
+};
+
+export type FetchedInboxItem = {
+  type: 'COMMENT' | 'MENTION' | 'DM';
+  remoteId: string;
+  threadKey?: string | null;
+  authorName?: string | null;
+  authorId?: string | null;
+  authorPicture?: string | null;
+  body: string;
+  replyCapable: boolean;
+  remoteUrl?: string | null;
+  remoteCreatedAt?: string | Date | null;
+};
+
+export type InboxReplyTarget = {
+  type: 'COMMENT' | 'MENTION' | 'DM';
+  remoteId: string;
+  threadKey?: string | null;
+  authorId?: string | null;
+};
