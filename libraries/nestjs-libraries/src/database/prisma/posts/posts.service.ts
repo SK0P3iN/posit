@@ -81,6 +81,67 @@ export class PostsService {
     return this._postRepository.updatePost(id, postId, releaseURL);
   }
 
+  getPostReleaseId(id: string) {
+    return this._postRepository.getPostReleaseId(id);
+  }
+
+  // Transient de-duplication for in-flight publishes (Redis + TTL), not a
+  // durable record — same pattern as TikTok resume markers.
+  async setPostInFlight(id: string, inFlightId: string) {
+    await ioRedis.set(`post:inflight:${id}`, inFlightId, 'EX', 2 * 60 * 60);
+  }
+
+  getPostInFlight(id: string) {
+    return ioRedis.get(`post:inflight:${id}`);
+  }
+
+  async clearPostInFlight(id: string) {
+    await ioRedis.del(`post:inflight:${id}`);
+  }
+
+  async confirmAlreadyLive(orgId: string, id: string) {
+    const post = await this._postRepository.getPostById(id, orgId);
+    if (!post) {
+      throw new BadRequestException('Post not found');
+    }
+    if (
+      post.state !== 'ERROR' ||
+      !String(post.error || '').startsWith('UNCONFIRMED:')
+    ) {
+      throw new BadRequestException(
+        'Only unconfirmed posts can be marked as already published'
+      );
+    }
+
+    const updated = await this._postRepository.confirmAlreadyLive(id, orgId);
+    if (!updated.count) {
+      throw new BadRequestException(
+        'Only unconfirmed posts can be marked as already published'
+      );
+    }
+
+    await this.clearPostInFlight(id);
+
+    return { id, state: 'PUBLISHED' as const };
+  }
+
+  private async assertCanRepublish(orgId: string, postIds: string[]) {
+    for (const id of postIds) {
+      if (!id) {
+        continue;
+      }
+      const existing = await this._postRepository.getPostById(id, orgId);
+      if (
+        existing?.state === 'ERROR' &&
+        String(existing.error || '').startsWith('UNCONFIRMED:')
+      ) {
+        throw new BadRequestException(
+          'This post is unconfirmed. Confirm it was published on the channel, or mark it as already live, before posting again.'
+        );
+      }
+    }
+  }
+
   async getMissingContent(
     orgId: string,
     postId: string,
@@ -726,7 +787,7 @@ export class PostsService {
     try {
       await this._temporalService.client
         .getRawClient()
-        ?.workflow.start('postWorkflowV106', {
+        ?.workflow.start('postWorkflowV107', {
           workflowId: `post_${postId}`,
           taskQueue: 'main',
           workflowIdConflictPolicy: 'TERMINATE_EXISTING',
@@ -878,6 +939,15 @@ export class PostsService {
     body: CreatePostDto,
     creationMethod: CreationMethod
   ): Promise<any[]> {
+    if (body.type === 'now' || body.type === 'schedule') {
+      await this.assertCanRepublish(
+        orgId,
+        body.posts.flatMap((post) =>
+          (post.value || []).map((value) => value.id).filter(Boolean)
+        ) as string[]
+      );
+    }
+
     const postList = [];
     for (const post of body.posts) {
       const provider = this._integrationManager.getSocialIntegration(
@@ -914,6 +984,25 @@ export class PostsService {
         return [] as any[];
       }
 
+      const attachedIds = [
+        ...new Set(
+          (post.value || []).flatMap((value) =>
+            this._mediaService.extractMediaIdsFromValues(
+              value.image,
+              post.settings
+            )
+          )
+        ),
+      ];
+      if (attachedIds.length) {
+        await this._mediaService.recordAttachedMedia(
+          orgId,
+          attachedIds,
+          posts[0].id
+        );
+        await this._postRepository.clearMediaMissing(orgId, posts[0].id);
+      }
+
       if (body.type !== 'update') {
         this.startWorkflow(
           post.settings.__type.split('-')[0].toLowerCase(),
@@ -938,7 +1027,13 @@ export class PostsService {
   }
 
   async changeState(id: string, state: State, err?: any, body?: any) {
-    return this._postRepository.changeState(id, state, err, body);
+    const updated = await this._postRepository.changeState(id, state, err, body);
+    // Only clear the resume marker when the row actually became ERROR (not
+    // when we refused to demote an already-PUBLISHED post).
+    if (updated?.state === 'ERROR') {
+      await this.clearPostInFlight(id);
+    }
+    return updated;
   }
 
   async changePostStatus(
@@ -949,6 +1044,10 @@ export class PostsService {
     const getPostById = await this._postRepository.getPostById(id, orgId);
     if (!getPostById) {
       throw new BadRequestException('Post not found');
+    }
+
+    if (status === 'schedule') {
+      await this.assertCanRepublish(orgId, [id]);
     }
 
     const state: State = status === 'draft' ? 'DRAFT' : 'QUEUE';
@@ -973,6 +1072,10 @@ export class PostsService {
     action: 'schedule' | 'update' = 'schedule'
   ) {
     const getPostById = await this._postRepository.getPostById(id, orgId);
+
+    if (action === 'schedule') {
+      await this.assertCanRepublish(orgId, [id]);
+    }
 
     // schedule: Set status to QUEUE and change date (reschedule the post)
     // update: Just change the date without changing the status
