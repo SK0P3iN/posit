@@ -65,7 +65,7 @@ A normalized engagement record in the Social Inbox: channel, type, author, body,
 ## Instagram publishing
 
 ### Story Companion Post
-A separate, independently tracked post created when a Feed post's "also share to Story" option is enabled. Republishes the same media as a Story; it is not Instagram's native reshare-to-Story sticker, and it links back to its originating Feed post through a dedicated relation kept separate from thread parent/child links. Its lifecycle cascades from the parent Feed post: an edit regenerates it, a delete or untoggle cancels it while it is still pending, and it is left alone once published or already in flight with the provider. It counts against the organization's post quota like any other scheduled post.
+A separate, independently tracked post created when a Feed post's "also share to Story" option is enabled. Republishes the same media as a Story; it is not Instagram's native reshare-to-Story sticker. It is a full top-level `Post` row with its own `group` and its own Temporal workflow run, linked back to its originating Feed post via the `storyCompanionOfPostId`/`storyCompanionOfPost` relation — a dedicated FK (with its own `@@unique` constraint, one companion per Feed post) kept separate from the thread `parentPostId`/`parentPost`/`childrenPost` relation. Deriving a companion is a generic, provider-agnostic hook (`deriveCompanionPosts` on `SocialProvider`) that every non-Instagram provider no-ops; only Instagram implements it. Its lifecycle cascades from the originating Feed post: an edit regenerates it, a delete or untoggle cancels it (soft-delete + its own workflow terminated) while it is still pending, and it is left alone once published or already in flight with the provider. It counts against the organization's post quota like any other scheduled post — companion creation is skipped (without affecting the Feed post) if the organization is already at its monthly cap.
 
 ## Relationships
 
@@ -76,4 +76,4 @@ A separate, independently tracked post created when a Feed post's "also share to
 - Auth Hold and Unconfirmed Publish are publish outcomes distinct from ordinary ERROR; Capability-Based Refresh governs which channels refresh quietly.
 - In-Flight Publish Marker bridges irreversible provider steps until confirmation; Workflow Versioning protects running Temporal executions when publish behavior changes.
 - An Organization’s Social Inbox contains Inbox Items sourced from connected channels.
-- A Story Companion Post links to its originating Feed post via a dedicated relation, not the thread parent/child link.
+- A Story Companion Post links to its originating Feed post via the dedicated `storyCompanionOfPostId` relation, not the thread `parentPostId`/`parentPost`/`childrenPost` link.

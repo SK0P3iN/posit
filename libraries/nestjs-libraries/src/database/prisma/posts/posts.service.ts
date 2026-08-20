@@ -34,6 +34,9 @@ import sharp from 'sharp';
 import { UploadFactory } from '@gitroom/nestjs-libraries/upload/upload.factory';
 import { Readable } from 'stream';
 import { OpenaiService } from '@gitroom/nestjs-libraries/openai/openai.service';
+import { SubscriptionService } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.service';
+import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service';
+import { pricing } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/pricing';
 dayjs.extend(utc);
 import * as Sentry from '@sentry/nestjs';
 import { TemporalService } from 'nestjs-temporal-core';
@@ -70,7 +73,9 @@ export class PostsService {
     private _shortLinkService: ShortLinkService,
     private _openaiService: OpenaiService,
     private _temporalService: TemporalService,
-    private _refreshIntegrationService: RefreshIntegrationService
+    private _refreshIntegrationService: RefreshIntegrationService,
+    private _subscriptionService: SubscriptionService,
+    private _organizationService: OrganizationService
   ) {}
 
   searchForMissingThreeHoursPosts() {
@@ -713,51 +718,13 @@ export class PostsService {
       });
   }
 
-  async deletePost(orgId: string, group: string) {
-    const post = await this._postRepository.deletePost(orgId, group);
-
-    if (post?.id) {
-      try {
-        const workflows = this._temporalService.client
-          .getRawClient()
-          ?.workflow.list({
-            query: `postId="${post.id}" AND ExecutionStatus="Running"`,
-          });
-
-        for await (const executionInfo of workflows) {
-          try {
-            const workflow =
-              await this._temporalService.client.getWorkflowHandle(
-                executionInfo.workflowId
-              );
-            if (
-              workflow &&
-              (await workflow.describe()).status.name !== 'TERMINATED'
-            ) {
-              await workflow.terminate();
-            }
-          } catch (err) {}
-        }
-      } catch (err) {}
-    }
-
-    return { error: true };
-  }
-
-  async countPostsFromDay(orgId: string, date: Date) {
-    return this._postRepository.countPostsFromDay(orgId, date);
-  }
-
-  getPostByForWebhookId(id: string) {
-    return this._postRepository.getPostByForWebhookId(id);
-  }
-
-  async startWorkflow(
-    taskQueue: string,
-    postId: string,
-    orgId: string,
-    state: State
-  ) {
+  /**
+   * Terminates any running Temporal workflow for a given post id. Shared by
+   * `deletePost` (Feed post), `startWorkflow` (pre-start cleanup), and
+   * companion cancellation (R15) — each post/companion has its own workflow
+   * run keyed by its own id, so this is always scoped to a single post.
+   */
+  private async terminateRunningWorkflowsForPost(postId: string) {
     try {
       const workflows = this._temporalService.client
         .getRawClient()
@@ -779,6 +746,233 @@ export class PostsService {
         } catch (err) {}
       }
     } catch (err) {}
+  }
+
+  async deletePost(orgId: string, group: string) {
+    // Fetch provider/settings context BEFORE the soft-delete below, so the
+    // Story Companion Post hook (R15) can decide whether the Feed post being
+    // deleted has a companion that needs canceling. `deletePost(orgId, group)`
+    // previously had no such context.
+    const groupPosts = await this._postRepository.getPostsByGroup(
+      orgId,
+      group
+    );
+    const rootPost = groupPosts.find((p) => !p.parentPostId);
+
+    const post = await this._postRepository.deletePost(orgId, group);
+
+    if (rootPost) {
+      await this.deriveCompanionPostForDelete(orgId, rootPost as any);
+    }
+
+    if (post?.id) {
+      await this.terminateRunningWorkflowsForPost(post.id);
+    }
+
+    return { error: true };
+  }
+
+  /**
+   * Story Companion Post derivation (R6/R15/R16) for post create/update.
+   * Consults the optional provider hook once; no-ops for any provider that
+   * doesn't implement `deriveCompanionPosts` (every provider except
+   * Instagram today). The Feed post itself has already been saved by the
+   * time this runs, so a failure or quota block here never affects it.
+   */
+  private async deriveCompanionPost(
+    orgId: string,
+    provider: ReturnType<IntegrationManager['getSocialIntegration']>,
+    savedPost: Post,
+    postBody: {
+      integration: { id: string };
+      value: Array<{ image?: any[] }>;
+      settings: any;
+    },
+    operation: 'create' | 'update',
+    creationMethod: CreationMethod
+  ) {
+    if (!provider?.deriveCompanionPosts) {
+      return;
+    }
+
+    const integration = await this._integrationService.getIntegrationById(
+      orgId,
+      postBody.integration.id
+    );
+    if (!integration) {
+      return;
+    }
+
+    const existingCompanion = await this._postRepository.getCompanionForPost(
+      orgId,
+      savedPost.id
+    );
+
+    const media = await this.updateMedia(
+      savedPost.id,
+      (postBody.value || []).flatMap((v) => v.image || [])
+    );
+
+    let result;
+    try {
+      result = await provider.deriveCompanionPosts({
+        operation,
+        postId: savedPost.id,
+        integration,
+        settings: postBody.settings,
+        media: media as any,
+        existingCompanion,
+      });
+    } catch (err) {
+      return;
+    }
+
+    if (!result || result.action === 'none') {
+      return;
+    }
+
+    if (result.action === 'cancel') {
+      await this.cancelCompanionPost(orgId, savedPost.id);
+      return;
+    }
+
+    // action === 'upsert': the companion consumes one unit of the org's
+    // monthly post quota, same as any other scheduled post (R16). If the
+    // org is already at its cap, skip creating/regenerating the companion —
+    // the Feed post itself is unaffected, it was already saved above.
+    if (!(await this.hasPostsPerMonthCapacity(orgId))) {
+      return;
+    }
+
+    const companion = await this._postRepository.upsertCompanionPost(
+      orgId,
+      savedPost.id,
+      integration.id,
+      savedPost.publishDate,
+      result.message,
+      result.media,
+      result.settings,
+      creationMethod
+    );
+
+    this.startWorkflow(
+      integration.providerIdentifier.split('-')[0].toLowerCase(),
+      companion.id,
+      orgId,
+      companion.state
+    ).catch((err) => {});
+  }
+
+  /**
+   * Story Companion Post derivation (R15) for the Feed post delete path.
+   * `rootPost` comes from `getPostsByGroup`, read before the group's
+   * soft-delete in `deletePost` above, so this has the provider/settings
+   * context that a bare `deletePost(orgId, group)` lacked.
+   */
+  private async deriveCompanionPostForDelete(orgId: string, rootPost: any) {
+    const provider = this._integrationManager.getSocialIntegration(
+      rootPost?.integration?.providerIdentifier
+    );
+
+    if (!provider?.deriveCompanionPosts) {
+      return;
+    }
+
+    const existingCompanion = await this._postRepository.getCompanionForPost(
+      orgId,
+      rootPost.id
+    );
+
+    if (!existingCompanion) {
+      return;
+    }
+
+    let result;
+    try {
+      result = await provider.deriveCompanionPosts({
+        operation: 'delete',
+        postId: rootPost.id,
+        integration: rootPost.integration,
+        settings: JSON.parse(rootPost.settings || '{}'),
+        media: JSON.parse(rootPost.image || '[]'),
+        existingCompanion,
+      });
+    } catch (err) {
+      return;
+    }
+
+    if (result?.action === 'cancel') {
+      await this.cancelCompanionPost(orgId, rootPost.id);
+    }
+  }
+
+  /**
+   * Mechanical cancellation of an existing companion (soft-delete + terminate
+   * its own running workflow) — the generic half of R15's cascade. *Whether*
+   * to cancel is the provider hook's call (U4, Instagram); this just carries
+   * that decision out once it's been made.
+   */
+  private async cancelCompanionPost(orgId: string, parentPostId: string) {
+    const companion = await this._postRepository.cancelCompanionPost(
+      orgId,
+      parentPostId
+    );
+
+    if (!companion?.id) {
+      return;
+    }
+
+    await this.terminateRunningWorkflowsForPost(companion.id);
+  }
+
+  /**
+   * Mirrors PermissionsService's POSTS_PER_MONTH check (R16) so companion
+   * creation is gated the same way a normal post at cap already is. Calls
+   * the same counting method (`countPostsFromDay`) that check calls;
+   * PermissionsService itself lives in apps/backend and cannot be imported
+   * from this library, so the surrounding cap-comparison glue is mirrored
+   * here rather than shared directly.
+   */
+  private async hasPostsPerMonthCapacity(orgId: string): Promise<boolean> {
+    if (!process.env.STRIPE_PUBLISHABLE_KEY) {
+      return true;
+    }
+
+    const subscription =
+      await this._subscriptionService.getSubscriptionByOrganizationId(orgId);
+    const tier = subscription?.subscriptionTier || 'FREE';
+    const postsPerMonth = pricing[tier]?.posts_per_month ?? 0;
+
+    const subscriptionRecord = await this._subscriptionService.getSubscription(
+      orgId
+    );
+    const org = subscriptionRecord?.createdAt
+      ? null
+      : await this._organizationService.getOrgById(orgId);
+    const createdAt = subscriptionRecord?.createdAt || org?.createdAt || new Date();
+
+    const totalMonthPast = Math.abs(dayjs(createdAt).diff(dayjs(), 'month'));
+    const checkFrom = dayjs(createdAt).add(totalMonthPast, 'month');
+    const count = await this.countPostsFromDay(orgId, checkFrom.toDate());
+
+    return count < postsPerMonth;
+  }
+
+  async countPostsFromDay(orgId: string, date: Date) {
+    return this._postRepository.countPostsFromDay(orgId, date);
+  }
+
+  getPostByForWebhookId(id: string) {
+    return this._postRepository.getPostByForWebhookId(id);
+  }
+
+  async startWorkflow(
+    taskQueue: string,
+    postId: string,
+    orgId: string,
+    state: State
+  ) {
+    await this.terminateRunningWorkflowsForPost(postId);
 
     if (state === 'DRAFT') {
       return;
@@ -1010,6 +1204,17 @@ export class PostsService {
           orgId,
           posts[0].state
         ).catch((err) => {});
+      }
+
+      if (body.type !== 'draft') {
+        await this.deriveCompanionPost(
+          orgId,
+          provider,
+          posts[0],
+          post,
+          body.type === 'update' ? 'update' : 'create',
+          creationMethod
+        );
       }
 
       Sentry.metrics.count('post_created', 1);

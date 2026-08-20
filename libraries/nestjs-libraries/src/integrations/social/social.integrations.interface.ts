@@ -246,7 +246,51 @@ export interface SocialProvider
     message: string,
     integration: Integration
   ): Promise<{ remoteId: string }>;
+  /**
+   * Optional hook (R6/R15) letting a provider derive a Story Companion Post
+   * from the settings/media of the post it is attached to. Called once from
+   * the generic create/update/delete path in `posts.service.ts` — absent on
+   * the interface (or simply not implemented) means "no companion, ever" for
+   * that provider, so every non-Instagram provider is a silent no-op today.
+   * The provider only *decides*; it never touches the database or Temporal
+   * itself — the generic caller acts on the returned instruction (upsert or
+   * cancel the companion row via the repository).
+   */
+  deriveCompanionPosts?(
+    context: CompanionDerivationContext
+  ): Promise<CompanionDerivationResult>;
 }
+
+/** What triggered the generic create/update/delete path to consult the hook. */
+export type CompanionDerivationOperation = 'create' | 'update' | 'delete';
+
+export type CompanionDerivationContext = {
+  operation: CompanionDerivationOperation;
+  /** The originating Feed post's own id (the companion link's target). */
+  postId: string;
+  integration: Integration;
+  /** Feed post settings (parsed, provider-shaped), e.g. the "also share to Story" toggle. */
+  settings: any;
+  media: MediaContent[];
+  /** The existing companion row for this Feed post, if one already exists. */
+  existingCompanion?: { id: string; state: string; releaseId: string | null } | null;
+};
+
+/**
+ * 'none'   - no companion should exist right now (toggle off / not applicable).
+ * 'upsert' - create or update the companion with the given message/media/settings.
+ * 'cancel' - an existing companion should be canceled (feed post edited to drop
+ *            the toggle, deleted, etc.) — a no-op if no companion exists yet.
+ */
+export type CompanionDerivationResult =
+  | { action: 'none' }
+  | {
+      action: 'upsert';
+      message: string;
+      media: MediaContent[];
+      settings: any;
+    }
+  | { action: 'cancel' };
 
 export type InboxCapabilities = {
   comments: boolean;

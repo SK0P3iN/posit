@@ -482,6 +482,7 @@ model Post {
   title                      String?
   description                String?
   parentPostId               String?
+  storyCompanionOfPostId     String?
   releaseId                  String?
   releaseURL                 String?
   settings                   String?
@@ -505,16 +506,20 @@ model Post {
   organization               Organization              @relation("organization", fields: [organizationId], references: [id])
   parentPost                 Post?                     @relation("parentPostId", fields: [parentPostId], references: [id])
   childrenPost               Post[]                    @relation("parentPostId")
+  storyCompanionOfPost       Post?                     @relation("storyCompanionOfPost", fields: [storyCompanionOfPostId], references: [id], onDelete: SetNull)
+  storyCompanionPost         Post?                     @relation("storyCompanionOfPost")
   submittedForOrder          Orders?                   @relation(fields: [submittedForOrderId], references: [id])
   submittedForOrganization   Organization?             @relation("submittedForOrg", fields: [submittedForOrganizationId], references: [id])
   tags                       TagsPosts[]
 
+  @@unique([storyCompanionOfPostId])
   @@index([group])
   @@index([deletedAt])
   @@index([publishDate])
   @@index([state])
   @@index([organizationId])
   @@index([parentPostId])
+  @@index([storyCompanionOfPostId])
   @@index([submittedForOrderId])
   @@index([intervalInDays])
   @@index([approvedSubmitForOrder])

@@ -714,6 +714,120 @@ export class PostsRepository {
     return { previousPost, posts };
   }
 
+  /**
+   * Story Companion Post (R6/R15): one companion per Feed post, enforced by
+   * the `storyCompanionOfPostId` @@unique constraint on `Post`. Keying the
+   * upsert on that column (instead of an id, like `createOrUpdatePost` keys
+   * on `id`) makes "does a companion already exist" atomic — two
+   * near-simultaneous derivations for the same Feed post race on the same
+   * unique key and settle on one row, never two.
+   */
+  async upsertCompanionPost(
+    orgId: string,
+    parentPostId: string,
+    integrationId: string,
+    publishDate: Date,
+    message: string,
+    media: unknown[],
+    settings: unknown,
+    creationMethod: CreationMethod
+  ) {
+    return this._post.model.post.upsert({
+      where: {
+        storyCompanionOfPostId: parentPostId,
+      },
+      create: {
+        publishDate,
+        content: message,
+        group: uuidv4(),
+        state: 'QUEUE',
+        image: JSON.stringify(media),
+        settings: JSON.stringify(settings),
+        creationMethod,
+        integration: {
+          connect: {
+            id: integrationId,
+            organizationId: orgId,
+          },
+        },
+        organization: {
+          connect: {
+            id: orgId,
+          },
+        },
+        storyCompanionOfPost: {
+          connect: {
+            id: parentPostId,
+          },
+        },
+      },
+      update: {
+        publishDate,
+        content: message,
+        image: JSON.stringify(media),
+        settings: JSON.stringify(settings),
+        state: 'QUEUE',
+        releaseId: null,
+        releaseURL: null,
+        error: null,
+        deletedAt: null,
+      },
+    });
+  }
+
+  /** The Feed post's current companion row (if any), for the derivation hook's context. */
+  getCompanionForPost(orgId: string, parentPostId: string) {
+    return this._post.model.post.findFirst({
+      where: {
+        organizationId: orgId,
+        storyCompanionOfPostId: parentPostId,
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+        state: true,
+        releaseId: true,
+      },
+    });
+  }
+
+  /**
+   * Mechanical half of companion cancellation (soft-delete only — mirrors
+   * the group-scoped `updateMany` half of the top-level `deletePost`, but
+   * scoped to the companion's own id/group instead of the Feed post's).
+   * The workflow-terminate half stays in the service, same as `deletePost`,
+   * since this repository has no Temporal client.
+   */
+  async cancelCompanionPost(orgId: string, parentPostId: string) {
+    const companion = await this._post.model.post.findFirst({
+      where: {
+        organizationId: orgId,
+        storyCompanionOfPostId: parentPostId,
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+        group: true,
+      },
+    });
+
+    if (!companion) {
+      return null;
+    }
+
+    await this._post.model.post.updateMany({
+      where: {
+        organizationId: orgId,
+        group: companion.group,
+      },
+      data: {
+        deletedAt: new Date(),
+      },
+    });
+
+    return companion;
+  }
+
   async submit(id: string, order: string, buyerOrganizationId: string) {
     return this._post.model.post.update({
       where: {
