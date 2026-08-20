@@ -178,9 +178,11 @@ export class PostsRepository {
         releaseURL: true,
         releaseId: true,
         state: true,
+        error: true,
         intervalInDays: true,
         group: true,
         creationMethod: true,
+        mediaMissing: true,
         tags: {
           select: {
             tag: true,
@@ -192,6 +194,7 @@ export class PostsRepository {
             providerIdentifier: true,
             name: true,
             picture: true,
+            refreshNeeded: true,
           },
         },
       },
@@ -290,9 +293,11 @@ export class PostsRepository {
           releaseURL: true,
           releaseId: true,
           state: true,
+          error: true,
           intervalInDays: true,
           group: true,
           creationMethod: true,
+          mediaMissing: true,
           tags: {
             select: {
               tag: true,
@@ -304,6 +309,7 @@ export class PostsRepository {
               providerIdentifier: true,
               name: true,
               picture: true,
+              refreshNeeded: true,
             },
           },
         },
@@ -402,6 +408,38 @@ export class PostsRepository {
     });
   }
 
+  confirmAlreadyLive(id: string, orgId: string) {
+    return this._post.model.post.updateMany({
+      where: {
+        id,
+        organizationId: orgId,
+        state: 'ERROR',
+        error: {
+          startsWith: 'UNCONFIRMED:',
+        },
+        deletedAt: null,
+      },
+      data: {
+        state: 'PUBLISHED',
+        error: null,
+        releaseId: 'user-confirmed',
+        releaseURL: '',
+      },
+    });
+  }
+
+  getPostReleaseId(id: string) {
+    return this._post.model.post.findUnique({
+      where: {
+        id,
+      },
+      select: {
+        releaseId: true,
+        releaseURL: true,
+      },
+    });
+  }
+
   updateReleaseId(id: string, orgId: string, releaseId: string) {
     return this._post.model.post.update({
       where: {
@@ -416,6 +454,27 @@ export class PostsRepository {
   }
 
   async changeState(id: string, state: State, err?: any, body?: any) {
+    // Boundary persist may have already marked PUBLISHED; do not demote to
+    // ERROR when a later workflow step fails (notification / update race).
+    if (state === 'ERROR') {
+      const current = await this._post.model.post.findUnique({
+        where: { id },
+        select: { state: true },
+      });
+      if (current?.state === 'PUBLISHED') {
+        return this._post.model.post.findUnique({
+          where: { id },
+          include: {
+            integration: {
+              select: {
+                providerIdentifier: true,
+              },
+            },
+          },
+        });
+      }
+    }
+
     const update = await this._post.model.post.update({
       where: {
         id,
@@ -919,5 +978,183 @@ export class PostsRepository {
         },
       },
     });
+  }
+
+  findEditablePostsPossiblyReferencingMedia(
+    orgId: string,
+    mediaIds: string[]
+  ) {
+    if (!mediaIds.length) {
+      return Promise.resolve([]);
+    }
+
+    return this._post.model.post.findMany({
+      where: {
+        organizationId: orgId,
+        deletedAt: null,
+        state: {
+          in: [State.DRAFT, State.QUEUE, State.ERROR],
+        },
+        OR: mediaIds.flatMap((id) => [
+          { image: { contains: id } },
+          { settings: { contains: id } },
+        ]),
+      },
+      select: {
+        id: true,
+        content: true,
+        publishDate: true,
+        state: true,
+        image: true,
+        settings: true,
+        title: true,
+      },
+    });
+  }
+
+  findAllEditablePostsWithMedia(orgId: string) {
+    return this._post.model.post.findMany({
+      where: {
+        organizationId: orgId,
+        deletedAt: null,
+        state: {
+          in: [State.DRAFT, State.QUEUE, State.ERROR],
+        },
+        OR: [
+          { image: { not: null } },
+          { settings: { not: null } },
+        ],
+      },
+      select: {
+        id: true,
+        image: true,
+        settings: true,
+      },
+    });
+  }
+
+  clearMediaMissing(orgId: string, postId: string) {
+    return this._post.model.post.updateMany({
+      where: {
+        id: postId,
+        organizationId: orgId,
+        mediaMissing: true,
+      },
+      data: {
+        mediaMissing: false,
+      },
+    });
+  }
+
+  async stripMediaFromPosts(orgId: string, mediaIds: string[]) {
+    const posts = await this.findEditablePostsPossiblyReferencingMedia(
+      orgId,
+      mediaIds
+    );
+    const idSet = new Set(mediaIds);
+    const updated: string[] = [];
+
+    for (const post of posts) {
+      const nextImage = this.stripMediaIdsFromImageJson(post.image, idSet);
+      const nextSettings = this.stripMediaIdsFromSettingsJson(
+        post.settings,
+        idSet
+      );
+
+      if (
+        nextImage === post.image &&
+        nextSettings === post.settings
+      ) {
+        continue;
+      }
+
+      await this._post.model.post.update({
+        where: { id: post.id },
+        data: {
+          image: nextImage,
+          settings: nextSettings,
+          mediaMissing: true,
+        },
+      });
+      updated.push(post.id);
+    }
+
+    return updated;
+  }
+
+  private stripMediaIdsFromImageJson(
+    image: string | null,
+    idSet: Set<string>
+  ) {
+    if (!image) {
+      return image;
+    }
+
+    try {
+      const parsed = JSON.parse(image);
+      if (!Array.isArray(parsed)) {
+        return image;
+      }
+      const filtered = parsed.filter(
+        (item) => !item?.id || !idSet.has(item.id)
+      );
+      return JSON.stringify(filtered);
+    } catch {
+      return image;
+    }
+  }
+
+  private stripMediaIdsFromSettingsJson(
+    settings: string | null,
+    idSet: Set<string>
+  ) {
+    if (!settings) {
+      return settings;
+    }
+
+    try {
+      const parsed = JSON.parse(settings);
+      const stripped = this.stripMediaDtoNodes(parsed, idSet);
+      return JSON.stringify(stripped);
+    } catch {
+      return settings;
+    }
+  }
+
+  private stripMediaDtoNodes(value: unknown, idSet: Set<string>): unknown {
+    if (Array.isArray(value)) {
+      return value
+        .filter(
+          (item) =>
+            !(
+              item &&
+              typeof item === 'object' &&
+              'id' in item &&
+              'path' in item &&
+              idSet.has((item as { id: string }).id)
+            )
+        )
+        .map((item) => this.stripMediaDtoNodes(item, idSet));
+    }
+
+    if (value && typeof value === 'object') {
+      const record = value as Record<string, unknown>;
+      if (
+        'id' in record &&
+        'path' in record &&
+        typeof record.id === 'string' &&
+        idSet.has(record.id)
+      ) {
+        return null;
+      }
+
+      const next: Record<string, unknown> = {};
+      for (const [key, child] of Object.entries(record)) {
+        next[key] = this.stripMediaDtoNodes(child, idSet);
+      }
+      return next;
+    }
+
+    return value;
   }
 }
