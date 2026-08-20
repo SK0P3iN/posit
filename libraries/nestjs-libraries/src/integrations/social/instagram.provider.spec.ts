@@ -761,4 +761,79 @@ describe('InstagramProvider - Graph API version (R13/U1)', () => {
       expect(result).toBeUndefined();
     });
   });
+
+  // U6/R12: the daily publishing-cap read, exposed through the existing
+  // generic provider-dispatch endpoint (functionIntegration calls
+  // `integrationProvider[body.name](token, data, internalId, integration)`)
+  // rather than a new route - see integrations.controller.ts.
+  describe('publishingLimit (U6/R12 - daily publishing cap, live from Meta)', () => {
+    it('is a thin passthrough of Meta\'s quota_usage/config fields, untransformed', async () => {
+      const metaResponse = {
+        data: [
+          {
+            quota_usage: 4,
+            config: { quota_total: 50, quota_duration: 86400 },
+          },
+        ],
+      };
+      fetchMock.mockImplementation(async (url: any) => {
+        calledUrls.push(String(url));
+        return jsonResponse(metaResponse);
+      });
+
+      const result = await provider.publishingLimit(
+        'access___user',
+        undefined,
+        'ig-user-1'
+      );
+
+      // Exact deep equality: nothing renamed, unwrapped or recomputed -
+      // no hardcoded cap number is ever introduced here.
+      expect(result).toEqual(metaResponse);
+    });
+
+    it('calls content_publishing_limit for the integration on the shared Graph API version', async () => {
+      fetchMock.mockImplementation(async (url: any) => {
+        calledUrls.push(String(url));
+        return jsonResponse({ data: [{ quota_usage: 0, config: {} }] });
+      });
+
+      await provider.publishingLimit('access___user', undefined, 'ig-user-1');
+
+      expectOnlyGraphApiVersion(calledUrls);
+      expect(
+        calledUrls.some(
+          (u) =>
+            u.includes(`/${GRAPH_API_VERSION}/ig-user-1/content_publishing_limit`) &&
+            u.includes('access_token=user')
+        )
+      ).toBe(true);
+    });
+
+    it('fails gracefully (returns null, does not throw) when the Graph API call errors', async () => {
+      fetchMock.mockImplementation(async (url: any) => {
+        calledUrls.push(String(url));
+        // A non-retried, non-refresh-token error status - this.fetch throws
+        // BadBody for it, the same way it would for music()/audioSearch().
+        return jsonResponse({ error: { code: 999999, message: 'boom' } }, 400);
+      });
+
+      await expect(
+        provider.publishingLimit('access___user', undefined, 'ig-user-1')
+      ).resolves.toBeNull();
+    });
+
+    it('falls back to the access token when no user token is present', async () => {
+      fetchMock.mockImplementation(async (url: any) => {
+        calledUrls.push(String(url));
+        return jsonResponse({ data: [{ quota_usage: 1, config: {} }] });
+      });
+
+      await provider.publishingLimit('solo-access', undefined, 'ig-user-2');
+
+      expect(
+        calledUrls.some((u) => u.includes('access_token=solo-access'))
+      ).toBe(true);
+    });
+  });
 });

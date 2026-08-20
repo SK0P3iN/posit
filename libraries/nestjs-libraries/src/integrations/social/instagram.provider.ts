@@ -1447,6 +1447,36 @@ export class InstagramProvider
     }));
   }
 
+  // https://developers.facebook.com/docs/instagram-platform/content-publishing/publishing-limit
+  // Live daily publishing-cap read (R12): a thin passthrough of Meta's raw
+  // response (quota_usage/config.quota_total/config.quota_duration), never
+  // a hardcoded cap - Meta's docs don't state a fixed number and secondary
+  // sources disagree on it precisely for that reason, so nothing here
+  // reshapes or renames what Meta sends back. Reached through the existing
+  // generic provider-dispatch endpoint (POST /integrations/function ->
+  // functionIntegration, KTD5), the same pattern already used for
+  // music()/audioSearch() - no new route, no Manager/Service layer.
+  // Matches postAnalytics()'s convention below of catching its own failures
+  // and returning a safe fallback: this is a live status read for display,
+  // so a Meta-side hiccup should surface as "unknown" to the composer
+  // rather than throw through the dispatch layer.
+  async publishingLimit(token: string, data?: any, internalId?: string) {
+    const [accessToken, userToken] = token.split('___');
+
+    try {
+      return await (
+        await this.fetch(
+          `https://graph.facebook.com/${GRAPH_API_VERSION}/${internalId}/content_publishing_limit?fields=config,quota_usage&access_token=${
+            userToken || accessToken
+          }`
+        )
+      ).json();
+    } catch (err) {
+      console.error('Error fetching Instagram publishing limit:', err);
+      return null;
+    }
+  }
+
   async postAnalytics(
     integrationId: string,
     token: string,
