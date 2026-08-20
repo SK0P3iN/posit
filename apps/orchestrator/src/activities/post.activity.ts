@@ -77,7 +77,7 @@ export class PostActivity {
     for (const post of list) {
       await this._temporalService.client
         .getRawClient()
-        .workflow.signalWithStart('postWorkflowV106', {
+        .workflow.signalWithStart('postWorkflowV107', {
           workflowId: `post_${post.id}`,
           taskQueue: 'main',
           signal: 'poke',
@@ -210,7 +210,7 @@ export class PostActivity {
     return this.postSocialInternal(integration, posts, false);
   }
 
-  // Used by postWorkflowV106 and up: providers that implement `postPending`
+  // Used by postWorkflowV106/V107 and up: providers that implement `postPending`
   // return a `pending` response the workflow resolves via checkPostStatus /
   // finalizePost. Older workflow versions keep calling `postSocial` and get
   // the old blocking behavior.
@@ -238,13 +238,36 @@ export class PostActivity {
       integration.providerIdentifier
     );
 
+    // If an earlier attempt already published (remote id persisted at the
+    // publish boundary), don't publish again. A releaseId equal to the one
+    // the workflow loaded means this cycle hasn't published yet (repeatable
+    // posts re-run with the same post id and an old releaseId).
+    const [firstPost] = posts;
+    let inFlight: string | undefined;
+    if (firstPost) {
+      const current = await this._postService.getPostReleaseId(firstPost.id);
+      if (current?.releaseId && current.releaseId !== firstPost.releaseId) {
+        return [
+          {
+            id: firstPost.id,
+            postId: current.releaseId,
+            releaseURL: current.releaseURL || '',
+            status: 'success',
+          },
+        ];
+      }
+
+      inFlight =
+        (await this._postService.getPostInFlight(firstPost.id)) || undefined;
+    }
+
     const newPosts = await this._postService.updateTags(
       integration.organizationId,
       posts
     );
 
     const mappedPosts = await Promise.all(
-      (newPosts || []).map(async (p) => ({
+      (newPosts || []).map(async (p, index) => ({
         id: p.id,
         message: stripHtmlValidation(
           getIntegration.editor,
@@ -260,8 +283,28 @@ export class PostActivity {
           JSON.parse(p.image || '[]'),
           getIntegration?.convertToJPEG || false
         ),
+        ...(index === 0 && inFlight ? { inFlight } : {}),
       }))
     );
+
+    const progress = async (response: {
+      id: string;
+      postId: string;
+      releaseURL: string;
+      status: string;
+    }) => {
+      if (response.status === 'in-progress') {
+        await this._postService.setPostInFlight(response.id, response.postId);
+        return;
+      }
+
+      await this._postService.updatePost(
+        response.id,
+        response.postId,
+        response.releaseURL
+      );
+      await this._postService.clearPostInFlight(response.id);
+    };
 
     const postNow =
       allowPending && getIntegration.postPending
@@ -269,13 +312,15 @@ export class PostActivity {
             integration.internalId,
             integration.token,
             mappedPosts,
-            integration
+            integration,
+            progress
           )
         : await getIntegration.post(
             integration.internalId,
             integration.token,
             mappedPosts,
-            integration
+            integration,
+            progress
           );
 
     // The post is already published at this point: the streak is best-effort,
@@ -308,11 +353,23 @@ export class PostActivity {
       integration.providerIdentifier
     );
 
-    return getIntegration.checkPostStatus(
+    const result = await getIntegration.checkPostStatus(
       integration.token,
       pendingData,
       integration
     );
+
+    const postDbId = pendingData?.postDbId as string | undefined;
+    if (postDbId && result.status === 'completed') {
+      await this._postService.updatePost(
+        postDbId,
+        result.postId,
+        result.releaseURL
+      );
+      await this._postService.clearPostInFlight(postDbId);
+    }
+
+    return result;
   }
 
   @ActivityMethod()
@@ -321,11 +378,30 @@ export class PostActivity {
       integration.providerIdentifier
     );
 
-    return getIntegration.finalizePost(
+    const result = await getIntegration.finalizePost(
       integration.token,
       pendingData,
       integration
     );
+
+    // Persist at the publish boundary using the opaque postDbId providers put
+    // in pendingData — activity args stay unchanged for Temporal safety.
+    const postDbId = pendingData?.postDbId as string | undefined;
+    if (postDbId && result.status === 'completed') {
+      await this._postService.updatePost(
+        postDbId,
+        result.postId,
+        result.releaseURL
+      );
+      await this._postService.clearPostInFlight(postDbId);
+    } else if (postDbId && result.status === 'pending' && result.pendingData) {
+      await this._postService.setPostInFlight(
+        postDbId,
+        JSON.stringify(result.pendingData)
+      );
+    }
+
+    return result;
   }
 
   @ActivityMethod()
