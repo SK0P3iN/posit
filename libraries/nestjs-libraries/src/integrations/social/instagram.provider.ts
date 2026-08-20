@@ -64,6 +64,13 @@ export class InstagramProvider
     if (!firstPost?.length) {
       return 'Should have at least one media';
     }
+    // Story-specific (R4/AE4): Stories publish one item at a time
+    // (finalizePost's 'stories' branch loops each container as its own
+    // story), they never support a carousel - reject before the generic
+    // 10-media carousel check below so the message stays Story-scoped.
+    if (settings?.post_type === 'story' && firstPost.length > 1) {
+      return 'Instagram Stories only support a single media item, not a carousel';
+    }
     if (firstPost.length > 10) {
       return 'Instagram carousel only supports up to 10 media attachments';
     }
@@ -707,7 +714,21 @@ export class InstagramProvider
     }
 
     const isStory = firstPost.settings.post_type === 'story';
+    // 'feed' / 'reel' are the explicit choices the composer offers (R1).
+    // 'post' is the legacy alias (KTD4): its behavior below is byte-for-byte
+    // the same implicit detection that existed before explicit post_type
+    // values were added - single video -> REELS, everything else unchanged
+    // (R2), so already-queued posts keep publishing exactly as before.
+    const requestedPostType = firstPost.settings.post_type;
     const isTrialReel = this.assetBoolean(firstPost.settings.is_trial_reel);
+    // share_to_feed (R8) has no documented Meta default, so it's always sent
+    // explicitly on every Reel publish rather than omitted. Default true
+    // (appears in Feed) when unset, matching today's implicit behavior where
+    // a single video always published in a way that also surfaced in Feed.
+    const shareToFeed =
+      typeof firstPost?.settings?.share_to_feed === 'boolean'
+        ? firstPost.settings.share_to_feed
+        : true;
     const medias = await Promise.all(
       firstPost?.media?.map(async (m) => {
         const caption =
@@ -718,20 +739,32 @@ export class InstagramProvider
           (firstPost?.media?.length || 0) > 1 && !isStory
             ? `&is_carousel_item=true`
             : ``;
-        const mediaType = hasExtension(m.path, 'mp4')
-          ? firstPost?.media?.length === 1
-            ? isStory
-              ? `video_url=${m.path}&media_type=STORIES`
-              : `video_url=${m.path}&media_type=REELS&thumb_offset=${
-                  m?.thumbnailTimestamp || 0
-                }`
-            : isStory
+
+        // Reel cover (R9): cover_url and thumb_offset are never sent in the
+        // same request - Meta's docs say cover_url silently wins if both are
+        // present, so thumb_offset is omitted whenever cover_url is set.
+        const coverParams = firstPost?.settings?.cover_url
+          ? `&cover_url=${encodeURIComponent(firstPost.settings.cover_url)}`
+          : `&thumb_offset=${m?.thumbnailTimestamp || 0}`;
+
+        // A single video (explicit `feed`/legacy `post`) still routes
+        // through REELS - Instagram no longer meaningfully supports a
+        // standalone Feed video post (AE1).
+        const isImplicitReel =
+          hasExtension(m.path, 'mp4') && firstPost?.media?.length === 1;
+
+        const mediaType = isStory
+          ? hasExtension(m.path, 'mp4')
             ? `video_url=${m.path}&media_type=STORIES`
-            : `video_url=${m.path}&media_type=VIDEO&thumb_offset=${
-                m?.thumbnailTimestamp || 0
-              }`
-          : isStory
-          ? `image_url=${m.path}&media_type=STORIES`
+            : `image_url=${m.path}&media_type=STORIES`
+          : requestedPostType === 'reel'
+          ? // Explicit Reel: always the REELS shape, regardless of media
+            // count/extension nuances the implicit paths key off of.
+            `video_url=${m.path}&media_type=REELS${coverParams}&share_to_feed=${shareToFeed}`
+          : hasExtension(m.path, 'mp4')
+          ? isImplicitReel
+            ? `video_url=${m.path}&media_type=REELS${coverParams}&share_to_feed=${shareToFeed}`
+            : `video_url=${m.path}&media_type=VIDEO${coverParams}`
           : `image_url=${m.path}`;
 
         const trialParams = isTrialReel
