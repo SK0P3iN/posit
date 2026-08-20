@@ -1,6 +1,8 @@
 import {
   AnalyticsData,
   AuthTokenDetails,
+  CompanionDerivationContext,
+  CompanionDerivationResult,
   PendingCheckResponse,
   PostDetails,
   PostResponse,
@@ -19,6 +21,7 @@ import { Integration } from '@prisma/client';
 import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
 import { Tool } from '@gitroom/nestjs-libraries/integrations/tool.decorator';
 import { hasExtension } from '@gitroom/helpers/utils/has.extension';
+import { ioRedis } from '@gitroom/nestjs-libraries/redis/redis.service';
 
 // Instagram Graph API version used across every call site in this file
 // (OAuth, page discovery, container create/publish, status/permalink, music,
@@ -1071,6 +1074,95 @@ export class InstagramProvider
       pendingData = result.pendingData;
       await timer(30000);
     }
+  }
+
+  /**
+   * Story Companion Post hook (R5/R6/R15). Reads the Feed post's own
+   * "also share to Story" toggle from settings and decides whether the
+   * generic caller (posts.service.ts, U3) should upsert or cancel the
+   * linked companion — this method never publishes or touches the
+   * database/Temporal itself.
+   *
+   * Field name: `also_share_to_story` (boolean | undefined). It doesn't
+   * exist on `InstagramDto` yet (U5 adds it) - read defensively so this
+   * unit works whether or not the field is present on `context.settings`.
+   *
+   * The companion's `settings` is `{ post_type: 'story' }`, the exact
+   * shape `postPending` already reads via `firstPost.settings.post_type
+   * === 'story'` to route media through the STORIES publish path
+   * (`media_type=STORIES`) instead of building a new one.
+   */
+  async deriveCompanionPosts(
+    context: CompanionDerivationContext
+  ): Promise<CompanionDerivationResult> {
+    const alsoShareToStory = context.settings?.also_share_to_story === true;
+
+    if (context.operation === 'delete' || !alsoShareToStory) {
+      return this.deriveCompanionCancellation(context.existingCompanion);
+    }
+
+    // Toggle is on: (re)generate the companion, unless it has already gone
+    // live - a published (or in-flight, i.e. releaseId already assigned by
+    // finalizePost) companion is left untouched rather than resent.
+    if (
+      context.existingCompanion &&
+      (context.existingCompanion.state === 'PUBLISHED' ||
+        context.existingCompanion.releaseId != null)
+    ) {
+      return { action: 'none' };
+    }
+
+    return {
+      action: 'upsert',
+      // Instagram Stories don't surface a caption the way Feed posts do,
+      // and `CompanionDerivationContext` doesn't carry the Feed post's own
+      // text (R7: the companion republishes the same *media*, not text).
+      message: '',
+      media: context.media,
+      settings: { post_type: 'story' },
+    };
+  }
+
+  /**
+   * KTD7's cancellation gate. An existing companion is only safe to cancel
+   * when all three hold: not yet PUBLISHED, no releaseId, and no live
+   * Redis in-flight marker (container created, publish not yet confirmed -
+   * the same `post:inflight:{id}` key `PostsService.setPostInFlight` /
+   * `getPostInFlight` use, read directly here since this plain class isn't
+   * NestJS-DI-injected and can't inject `PostsService`).
+   *
+   * If any of those signals says "an irreversible remote step may already
+   * be under way or done", this returns `{ action: 'none' }` rather than a
+   * new bespoke cancellation heuristic. That companion is just a normal
+   * Post row flowing through the same postWorkflowV107 as any other post,
+   * so the *existing* UNCONFIRMED: reconciliation machinery
+   * (`assertCanRepublish` blocking republish, `confirm-published` letting
+   * the user resolve it) already protects it exactly the way it protects
+   * every other post the workflow can't confirm - there is nothing to
+   * build here, only something to avoid stepping on by not canceling.
+   */
+  private async deriveCompanionCancellation(
+    existingCompanion: CompanionDerivationContext['existingCompanion']
+  ): Promise<CompanionDerivationResult> {
+    if (!existingCompanion) {
+      return { action: 'none' };
+    }
+
+    if (
+      existingCompanion.state === 'PUBLISHED' ||
+      existingCompanion.releaseId != null
+    ) {
+      return { action: 'none' };
+    }
+
+    const inFlight = await ioRedis.get(
+      `post:inflight:${existingCompanion.id}`
+    );
+    if (inFlight) {
+      return { action: 'none' };
+    }
+
+    return { action: 'cancel' };
   }
 
   override inboxCapabilities() {

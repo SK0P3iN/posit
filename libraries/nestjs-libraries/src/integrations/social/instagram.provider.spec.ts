@@ -1,5 +1,6 @@
 import { GRAPH_API_VERSION, InstagramProvider } from './instagram.provider';
 import { Integration } from '@prisma/client';
+import { ioRedis } from '@gitroom/nestjs-libraries/redis/redis.service';
 
 // Every call this provider makes is either through global fetch or through
 // this.fetch (SocialAbstract's wrapper, which itself calls global fetch).
@@ -392,6 +393,166 @@ describe('InstagramProvider - Graph API version (R13/U1)', () => {
       expectOnlyGraphApiVersion(calledUrls);
       expect(calledUrls.some((u) => u.includes('media_publish'))).toBe(true);
       expect(calledUrls.some((u) => u.includes('fields=permalink'))).toBe(true);
+    });
+  });
+
+  describe('deriveCompanionPosts (U4 - Story Companion Post hook)', () => {
+    const baseIntegration = { id: 'integration-1' } as Integration;
+    const media = [{ type: 'image', path: 'https://cdn/img.png' }] as any;
+
+    const buildContext = (overrides: any) => ({
+      operation: 'create' as const,
+      postId: 'post-1',
+      integration: baseIntegration,
+      settings: {},
+      media,
+      existingCompanion: null,
+      ...overrides,
+    });
+
+    afterEach(async () => {
+      // MockRedis persists across tests within the same process - clear any
+      // in-flight marker a test set so it can't leak into the next one.
+      await ioRedis.del('post:inflight:companion-1');
+    });
+
+    it('toggle on, no existing companion -> upserts settings that route through the existing Story publish path', async () => {
+      const result = await provider.deriveCompanionPosts(
+        buildContext({ settings: { also_share_to_story: true } })
+      );
+
+      expect(result.action).toBe('upsert');
+      expect((result as any).settings).toEqual({ post_type: 'story' });
+      expect((result as any).media).toEqual(media);
+
+      // Confirm the settings shape actually fires the STORIES publish path.
+      calledUrls = [];
+      await provider.postPending(
+        'ig-id',
+        'access___user',
+        [
+          {
+            id: 'companion-1',
+            message: (result as any).message,
+            media,
+            settings: (result as any).settings,
+          } as any,
+        ],
+        baseIntegration
+      );
+      expect(
+        calledUrls.some(
+          (u) =>
+            u.includes(`/${GRAPH_API_VERSION}/ig-id/media?image_url=`) &&
+            u.includes('media_type=STORIES')
+        )
+      ).toBe(true);
+    });
+
+    it('toggle off, no existing companion -> none', async () => {
+      const result = await provider.deriveCompanionPosts(
+        buildContext({ settings: { also_share_to_story: false } })
+      );
+      expect(result).toEqual({ action: 'none' });
+    });
+
+    it('(AE6) toggle on, existing companion not yet published -> upserts again (regenerate)', async () => {
+      const result = await provider.deriveCompanionPosts(
+        buildContext({
+          settings: { also_share_to_story: true },
+          existingCompanion: {
+            id: 'companion-1',
+            state: 'QUEUE',
+            releaseId: null,
+          },
+        })
+      );
+      expect(result.action).toBe('upsert');
+    });
+
+    it('(AE5) toggle off, existing companion already published -> does not cancel', async () => {
+      const result = await provider.deriveCompanionPosts(
+        buildContext({
+          operation: 'update',
+          settings: { also_share_to_story: false },
+          existingCompanion: {
+            id: 'companion-1',
+            state: 'PUBLISHED',
+            releaseId: 'media-1',
+          },
+        })
+      );
+      expect(result).toEqual({ action: 'none' });
+    });
+
+    it('(AE5) delete, existing companion already published -> does not cancel', async () => {
+      const result = await provider.deriveCompanionPosts(
+        buildContext({
+          operation: 'delete',
+          existingCompanion: {
+            id: 'companion-1',
+            state: 'PUBLISHED',
+            releaseId: 'media-1',
+          },
+        })
+      );
+      expect(result).toEqual({ action: 'none' });
+    });
+
+    it('(AE7) toggle off, existing companion not published but has a live Redis in-flight marker -> does not cancel', async () => {
+      await ioRedis.set('post:inflight:companion-1', JSON.stringify({ some: 'pending-data' }));
+
+      const result = await provider.deriveCompanionPosts(
+        buildContext({
+          operation: 'update',
+          settings: { also_share_to_story: false },
+          existingCompanion: {
+            id: 'companion-1',
+            state: 'QUEUE',
+            releaseId: null,
+          },
+        })
+      );
+      expect(result).toEqual({ action: 'none' });
+    });
+
+    it('toggle off, existing companion safely cancelable (not published, no in-flight marker) -> cancels', async () => {
+      const result = await provider.deriveCompanionPosts(
+        buildContext({
+          operation: 'update',
+          settings: { also_share_to_story: false },
+          existingCompanion: {
+            id: 'companion-1',
+            state: 'QUEUE',
+            releaseId: null,
+          },
+        })
+      );
+      expect(result).toEqual({ action: 'cancel' });
+    });
+
+    it('delete, existing companion safely cancelable -> cancels', async () => {
+      const result = await provider.deriveCompanionPosts(
+        buildContext({
+          operation: 'delete',
+          existingCompanion: {
+            id: 'companion-1',
+            state: 'QUEUE',
+            releaseId: null,
+          },
+        })
+      );
+      expect(result).toEqual({ action: 'cancel' });
+    });
+
+    it('no existing companion, toggle off -> none (nothing to cancel)', async () => {
+      const result = await provider.deriveCompanionPosts(
+        buildContext({
+          operation: 'delete',
+          existingCompanion: null,
+        })
+      );
+      expect(result).toEqual({ action: 'none' });
     });
   });
 
