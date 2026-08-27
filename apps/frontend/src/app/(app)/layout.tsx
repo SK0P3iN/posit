@@ -85,6 +85,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           extensionId={process.env.EXTENSION_ID || ''}
           googleAdsId={process.env.NEXT_PUBLIC_GTM_ID}
           googleAdsTrialTracking={process.env.NEXT_PUBLIC_TRACKING_TRIAL}
+          facebookAppId={process.env.FACEBOOK_APP_ID}
           language={language}
           transloadit={
             process.env.TRANSLOADIT_AUTH && process.env.TRANSLOADIT_TEMPLATE

@@ -1,0 +1,57 @@
+'use client';
+
+import { FC, useRef } from 'react';
+import Script from 'next/script';
+import { InboxItem } from '@gitroom/frontend/components/inbox/use.inbox.hooks';
+import { useEmbedFallbackTimeout } from '@gitroom/frontend/components/inbox/embeds/embed.fallback.timeout.hook';
+import { useT } from '@gitroom/react/translation/get.transation.service.client';
+
+declare global {
+  interface Window {
+    instgrm?: {
+      Embeds: {
+        process: () => void;
+      };
+    };
+  }
+}
+
+export const InstagramEmbed: FC<{ item: InboxItem }> = ({ item }) => {
+  const t = useT();
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const status = useEmbedFallbackTimeout(item.id, containerRef, () => {
+    window.instgrm?.Embeds?.process();
+  });
+
+  if (status === 'failed') {
+    return item.remoteUrl ? (
+      <a
+        href={item.remoteUrl}
+        target="_blank"
+        rel="noreferrer"
+        className="text-[13px] text-btnPrimary underline"
+      >
+        {t('open_on_platform', 'Open')}
+      </a>
+    ) : null;
+  }
+
+  return (
+    <div>
+      <Script
+        id="instagram-embed-sdk"
+        src="https://www.instagram.com/embed.js"
+        strategy="lazyOnload"
+        onLoad={() => window.instgrm?.Embeds?.process()}
+      />
+      <div ref={containerRef} className="max-w-[420px]">
+        <blockquote
+          className="instagram-media"
+          data-instgrm-permalink={item.remoteUrl || ''}
+          data-instgrm-version="14"
+        />
+      </div>
+    </div>
+  );
+};

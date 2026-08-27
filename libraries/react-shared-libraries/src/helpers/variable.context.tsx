@@ -32,6 +32,7 @@ interface VariableContextInterface {
   extensionId: string;
   googleAdsId?: string;
   googleAdsTrialTracking?: string;
+  facebookAppId?: string;
 }
 const VariableContext = createContext({
   stripeClient: '',
