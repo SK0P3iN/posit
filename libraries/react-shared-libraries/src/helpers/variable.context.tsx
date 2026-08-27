@@ -45,6 +45,7 @@ const VariableContext = createContext({
   googleAdsTrialTracking: '',
   oauthDisplayName: '',
   mcpUrl: '',
+  facebookAppId: '',
   cloudflareUrl: '',
   mainUrl: '',
   frontEndUrl: '',

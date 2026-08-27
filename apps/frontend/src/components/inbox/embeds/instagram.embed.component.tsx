@@ -10,7 +10,9 @@ declare global {
   interface Window {
     instgrm?: {
       Embeds: {
-        process: () => void;
+        // Optional element scopes the scan to one container instead of
+        // rescanning the whole document on every item switch.
+        process: (element?: HTMLElement) => void;
       };
     };
   }
@@ -20,7 +22,7 @@ export const InstagramEmbed: FC<{ item: InboxItem }> = ({ item }) => {
   const containerRef = useRef<HTMLDivElement>(null);
 
   const status = useEmbedFallbackTimeout(item.id, containerRef, () => {
-    window.instgrm?.Embeds?.process();
+    window.instgrm?.Embeds?.process(containerRef.current || undefined);
   });
 
   if (status === 'failed') {
@@ -33,7 +35,9 @@ export const InstagramEmbed: FC<{ item: InboxItem }> = ({ item }) => {
         id="instagram-embed-sdk"
         src="https://www.instagram.com/embed.js"
         strategy="lazyOnload"
-        onLoad={() => window.instgrm?.Embeds?.process()}
+        onLoad={() =>
+          window.instgrm?.Embeds?.process(containerRef.current || undefined)
+        }
       />
       <div ref={containerRef} className="max-w-[420px]">
         <blockquote
