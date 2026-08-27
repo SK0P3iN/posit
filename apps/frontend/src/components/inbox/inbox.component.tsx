@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
 import dayjs from 'dayjs';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
@@ -25,6 +25,7 @@ export const InboxComponent = () => {
   const [type, setType] = useState<string>('');
   const [unreadOnly, setUnreadOnly] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedItem, setSelectedItem] = useState<InboxItem | null>(null);
   const [reply, setReply] = useState('');
   const [sending, setSending] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -38,10 +39,20 @@ export const InboxComponent = () => {
   const { data: syncStatus, mutate: mutateSync } = useInboxSyncStatus();
 
   const items: InboxItem[] = data?.items || [];
-  const selected = useMemo(
-    () => items.find((item) => item.id === selectedId) || null,
-    [items, selectedId]
-  );
+
+  // Keep the open detail/reply pane in sync with the live list (e.g. a
+  // KTD9 local cache patch or a real refetch) whenever the selected item is
+  // still present in it, without ever clearing the pane just because a
+  // filter/sync (R6) legitimately dropped the item out of `items` (R5/KTD8).
+  useEffect(() => {
+    setSelectedItem((current) => {
+      if (!current) {
+        return current;
+      }
+      const updated = items.find((item) => item.id === current.id);
+      return updated || current;
+    });
+  }, [items]);
 
   const supportedChannels = useMemo(
     () =>
@@ -62,33 +73,78 @@ export const InboxComponent = () => {
     () =>
       (capabilities || []).find(
         (c: InboxChannelCapabilities) =>
-          c.integrationId === selected?.integration.id
+          c.integrationId === selectedItem?.integration.id
       ),
-    [capabilities, selected]
+    [capabilities, selectedItem]
   );
-  const EmbedComponent = selected
-    ? InboxEmbedProviders[selected.integration.providerIdentifier]
+  const EmbedComponent = selectedItem
+    ? InboxEmbedProviders[selectedItem.integration.providerIdentifier]
     : undefined;
   const canEmbed = !!(
     EmbedComponent &&
     selectedCapability?.embeddable &&
-    selected?.remoteUrl
+    selectedItem?.remoteUrl
   );
 
   useEffect(() => {
     if (!selectedId && items[0]?.id) {
       setSelectedId(items[0].id);
+      setSelectedItem(items[0]);
     }
   }, [items, selectedId]);
 
+  // `fetch`/`mutate` are re-bound to a new identity on every unrelated
+  // filter/page/type change (a new `useInboxList` key means a new bound
+  // `mutate`), so they can't sit in this effect's dependency array without
+  // making a filter toggle re-fire the "mark read" call and re-patch the
+  // cache mid-flight. Latest-ref indirection keeps the effect keyed only on
+  // whether the *selected item itself* needs marking read, while still
+  // calling through to the current fetch/mutate when it does fire.
+  const fetchRef = useRef(fetch);
+  fetchRef.current = fetch;
+  const mutateRef = useRef(mutate);
+  mutateRef.current = mutate;
+  // Guards the two local-patch call sites below (mark-read, reply) against
+  // patching a key that hasn't finished its first load yet: SWR discards an
+  // in-flight revalidation's result whenever *any* mutate() call — even a
+  // no-op one, even with revalidate:false — overlaps it (this is intrinsic
+  // to SWR's cache, not something the patch's return value controls). A
+  // filter/page/type change can swap `mutate` (via the refs above) to a
+  // brand-new key mid-flight, and calling mutate() before that key has any
+  // data yet would strand it on `undefined` with nothing left to revalidate
+  // it. There's nothing to patch in an empty cache anyway — the fetch that's
+  // about to land already carries the correct server state for that key.
+  const dataRef = useRef(data);
+  dataRef.current = data;
+
   useEffect(() => {
-    if (!selected?.id || selected.readAt) {
+    if (!selectedItem?.id || selectedItem.readAt) {
       return;
     }
-    fetch(`/inbox/${selected.id}/read`, { method: 'PUT' })
-      .then(() => mutate())
+    const id = selectedItem.id;
+    fetchRef
+      .current(`/inbox/${id}/read`, { method: 'PUT' })
+      .then(() => {
+        if (!dataRef.current) {
+          return;
+        }
+        mutateRef.current(
+          (currentData: any) =>
+            currentData
+              ? {
+                  ...currentData,
+                  items: currentData.items.map((i: InboxItem) =>
+                    i.id === id
+                      ? { ...i, readAt: new Date().toISOString() }
+                      : i
+                  ),
+                }
+              : currentData,
+          false
+        );
+      })
       .catch(() => undefined);
-  }, [selected?.id, selected?.readAt, fetch, mutate]);
+  }, [selectedItem?.id, selectedItem?.readAt]);
 
   const syncNow = useCallback(async () => {
     setSyncing(true);
@@ -111,12 +167,13 @@ export const InboxComponent = () => {
   }, [fetch, mutate, mutateSync, toaster, t]);
 
   const sendReply = useCallback(async () => {
-    if (!selected?.id || !reply.trim()) {
+    if (!selectedItem?.id || !reply.trim()) {
       return;
     }
+    const id = selectedItem.id;
     setSending(true);
     try {
-      const response = await fetch(`/inbox/${selected.id}/reply`, {
+      const response = await fetch(`/inbox/${id}/reply`, {
         method: 'POST',
         body: JSON.stringify({ message: reply.trim() }),
       });
@@ -130,13 +187,32 @@ export const InboxComponent = () => {
       }
       setReply('');
       toaster.show(t('inbox_reply_sent', 'Reply sent'));
-      mutate();
+      // Local cache patch (functional updater), not a revalidating refetch:
+      // keeps the item in an active "unread only" list per R6/KTD9, and lets
+      // this patch compose with a concurrent mark-read patch instead of
+      // racing it with a stale snapshot. Guarded the same way as the
+      // mark-read patch above (skip if this key has no data yet) so a
+      // filter/page change mid-flight can't strand an in-flight fetch.
+      if (dataRef.current) {
+        mutate(
+          (currentData: any) =>
+            currentData
+              ? {
+                  ...currentData,
+                  items: currentData.items.map((i: InboxItem) =>
+                    i.id === id ? { ...i } : i
+                  ),
+                }
+              : currentData,
+          false
+        );
+      }
     } catch {
       toaster.show(t('inbox_reply_failed', 'Reply failed'), 'warning');
     } finally {
       setSending(false);
     }
-  }, [selected, reply, fetch, toaster, t, mutate]);
+  }, [selectedItem, reply, fetch, toaster, t, mutate]);
 
   return (
     <div className="flex flex-col gap-[16px] flex-1 min-h-0">
@@ -219,7 +295,10 @@ export const InboxComponent = () => {
               <button
                 key={item.id}
                 type="button"
-                onClick={() => setSelectedId(item.id)}
+                onClick={() => {
+                  setSelectedId(item.id);
+                  setSelectedItem(item);
+                }}
                 className={clsx(
                   'w-full text-start px-[14px] py-[12px] border-b border-newBorder hover:bg-seventh/40',
                   selectedId === item.id && 'bg-seventh/60',
@@ -267,17 +346,17 @@ export const InboxComponent = () => {
         </div>
 
         <div className="flex-1 bg-newBgColorInner rounded-[12px] border border-newBorder p-[16px] flex flex-col gap-[12px]">
-          {!selected && (
+          {!selectedItem && (
             <div className="opacity-70 text-[14px]">
               {t('select_inbox_item', 'Select an item to read and reply')}
             </div>
           )}
-          {selected && (
+          {selectedItem && (
             <>
               <div className="flex items-start gap-[12px]">
-                {selected.authorPicture ? (
+                {selectedItem.authorPicture ? (
                   <img
-                    src={selected.authorPicture}
+                    src={selectedItem.authorPicture}
                     alt=""
                     className="w-[40px] h-[40px] rounded-full"
                   />
@@ -286,27 +365,27 @@ export const InboxComponent = () => {
                 )}
                 <div className="flex-1">
                   <div className="font-[600]">
-                    {selected.authorName || t('unknown_author', 'Unknown')}
+                    {selectedItem.authorName || t('unknown_author', 'Unknown')}
                   </div>
                   <div className="text-[12px] opacity-70">
-                    {selected.integration.name} · {selected.type}
-                    {selected.remoteCreatedAt
-                      ? ` · ${dayjs(selected.remoteCreatedAt).format(
+                    {selectedItem.integration.name} · {selectedItem.type}
+                    {selectedItem.remoteCreatedAt
+                      ? ` · ${dayjs(selectedItem.remoteCreatedAt).format(
                           'MMM D, YYYY HH:mm'
                         )}`
                       : ''}
                   </div>
                 </div>
                 {canEmbed && EmbedComponent ? (
-                  <EmbedComponent key={selected.id} item={selected} />
+                  <EmbedComponent key={selectedItem.id} item={selectedItem} />
                 ) : (
-                  <OpenLink remoteUrl={selected.remoteUrl} />
+                  <OpenLink remoteUrl={selectedItem.remoteUrl} />
                 )}
               </div>
               <div className="whitespace-pre-wrap text-[15px] leading-[22px] flex-1">
-                {selected.body}
+                {selectedItem.body}
               </div>
-              {selected.replyCapable ? (
+              {selectedItem.replyCapable ? (
                 <div className="flex flex-col gap-[8px]">
                   <textarea
                     className="w-full min-h-[90px] rounded-[8px] bg-newBgColor border border-newBorder p-[12px] text-[14px]"
