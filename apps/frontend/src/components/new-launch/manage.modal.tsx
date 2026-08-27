@@ -43,12 +43,23 @@ import { useHasScroll } from '@gitroom/frontend/components/ui/is.scroll.hook';
 import { useShortlinkPreference } from '@gitroom/frontend/components/settings/shortlink-preference.component';
 import dayjs from 'dayjs';
 import { Button } from '@gitroom/react/form/button';
+import { MediaMissingBadge } from '@gitroom/frontend/components/media/media.missing.badge';
 
 export const ManageModal: FC<AddEditModalProps> = (props) => {
   const t = useT();
   const fetch = useFetch();
   const ref = useRef(null);
   const existingData = useExistingData();
+  const hasMediaMissing = useMemo(
+    () => existingData?.posts?.some((post) => post.mediaMissing),
+    [existingData?.posts]
+  );
+  const unconfirmedError = useMemo(() => {
+    const error = existingData?.posts?.[0]?.error;
+    return typeof error === 'string' && error.startsWith('UNCONFIRMED:')
+      ? error
+      : null;
+  }, [existingData?.posts]);
   const [loading, setLoading] = useState(false);
   const toaster = useToaster();
   const modal = useModals();
@@ -90,6 +101,20 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
       activateExitButton: state.activateExitButton,
     }))
   );
+
+  const authHeld = useMemo(() => {
+    if (!existingData?.integration) {
+      return false;
+    }
+    const post = existingData?.posts?.[0];
+    const channel = integrations.find((p) => p.id === existingData.integration);
+    return (
+      post?.state === 'QUEUE' &&
+      (!!channel?.refreshNeeded ||
+        (typeof post?.error === 'string' &&
+          post.error.startsWith('AUTH_HOLD:')))
+    );
+  }, [existingData, integrations]);
 
   useEffect(() => {
     if (hide) {
@@ -192,6 +217,20 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
 
   const schedule = useCallback(
     (type: 'draft' | 'now' | 'schedule' | 'update') => async () => {
+      if (
+        unconfirmedError &&
+        (type === 'now' || type === 'schedule')
+      ) {
+        toaster.show(
+          t(
+            'unconfirmed_block_retry',
+            'This post may already be live. Confirm it on the channel, then mark it as already published — do not republish.'
+          ),
+          'warning'
+        );
+        return;
+      }
+
       if (
         (type === 'now' || type === 'schedule') &&
         (existingData?.posts?.[0]?.state === 'PUBLISHED' ||
@@ -435,8 +474,66 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
         }
       }
     },
-    [ref, repeater, tags, date, addEditSets, dummy, shortlinkPreferenceData]
+    [
+      ref,
+      repeater,
+      tags,
+      date,
+      addEditSets,
+      dummy,
+      shortlinkPreferenceData,
+      unconfirmedError,
+      existingData,
+      toaster,
+      t,
+      modal,
+      mutate,
+      customClose,
+      selectedIntegrations,
+      fetch,
+    ]
   );
+
+  const confirmAlreadyPublished = useCallback(async () => {
+    const postId = existingData?.posts?.[0]?.id;
+    if (!postId || !unconfirmedError) {
+      return;
+    }
+    if (
+      !(await deleteDialog(
+        t(
+          'confirm_already_published_question',
+          'Mark this post as already published without posting again? Only do this if you verified it is live on the channel.'
+        ),
+        t('yes_mark_published', 'Yes, mark as published')
+      ))
+    ) {
+      return;
+    }
+    setLoading(true);
+    try {
+      const response = await fetch(`/posts/${postId}/confirm-published`, {
+        method: 'POST',
+      });
+      if (!response.ok) {
+        toaster.show(
+          t(
+            'confirm_already_published_failed',
+            'Could not mark the post as published'
+          ),
+          'warning'
+        );
+        return;
+      }
+      mutate();
+      toaster.show(
+        t('confirm_already_published_success', 'Marked as published')
+      );
+      modal.closeAll();
+    } finally {
+      setLoading(false);
+    }
+  }, [existingData, unconfirmedError, fetch, mutate, toaster, t, modal]);
 
   return (
     <div className="w-full h-full flex-1 p-[40px] flex relative">
@@ -449,6 +546,20 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                 creationMethod={existingData?.posts?.[0]?.creationMethod}
                 size="sm"
               />
+              {hasMediaMissing && <MediaMissingBadge variant="inline" />}
+              {authHeld && (
+                <span className="text-[12px] font-[500] text-amber-400 bg-amber-500/15 px-[10px] py-[4px] rounded-[6px]">
+                  {t(
+                    'auth_held_banner',
+                    'Held — reconnect channel to publish'
+                  )}
+                </span>
+              )}
+              {unconfirmedError && (
+                <span className="text-[12px] font-[500] text-amber-400 bg-amber-500/15 px-[10px] py-[4px] rounded-[6px]">
+                  {t('unconfirmed_banner', 'Unconfirmed publish')}
+                </span>
+              )}
             </div>
             <div className="flex-1 flex flex-col gap-[16px]">
               <div
@@ -551,7 +662,25 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
         </div>
         <div className="select-none h-[84px] py-[20px] border-t border-newBorder flex items-center">
           <div className="flex-1 flex ps-[20px] gap-[8px]">
-            {!dummy && (
+            {unconfirmedError && (
+              <div className="flex items-center gap-[8px] max-w-[420px]">
+                <div className="text-[13px] text-textColor opacity-90 leading-tight">
+                  {t(
+                    'unconfirmed_post_guidance',
+                    'Unconfirmed — check the channel before posting again.'
+                  )}
+                </div>
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={confirmAlreadyPublished}
+                  className="cursor-pointer disabled:cursor-not-allowed whitespace-nowrap px-[12px] h-[36px] rounded-[8px] bg-btnSimple text-[13px] font-[600]"
+                >
+                  {t('mark_already_published', 'Mark as published')}
+                </button>
+              </div>
+            )}
+            {!dummy && !unconfirmedError && (
               <TagsComponent
                 name="tags"
                 label={t('tags', 'Tags')}
@@ -562,7 +691,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
               />
             )}
 
-            {!dummy && (
+            {!dummy && !unconfirmedError && (
               <RepeatComponent repeat={repeater} onChange={setRepeater} />
             )}
           </div>
@@ -612,7 +741,10 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
               <div className="group cursor-pointer relative">
                 <button
                   disabled={
-                    selectedIntegrations.length === 0 || loading || locked
+                    selectedIntegrations.length === 0 ||
+                    loading ||
+                    locked ||
+                    !!unconfirmedError
                   }
                   onClick={schedule('schedule')}
                   className="text-white relative min-w-[180px] btnSub disabled:cursor-not-allowed disabled:opacity-80 outline-none gap-[8px] flex justify-center items-center h-[44px] rounded-[8px] bg-[#612BD3] ps-[20px] pe-[16px]"
@@ -649,7 +781,10 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                   <button
                     onClick={schedule('now')}
                     disabled={
-                      selectedIntegrations.length === 0 || loading || locked
+                      selectedIntegrations.length === 0 ||
+                      loading ||
+                      locked ||
+                      !!unconfirmedError
                     }
                     className="rounded-[8px] z-[300] disabled:cursor-not-allowed disabled:opacity-80 hidden group-hover:flex absolute bottom-[100%] -left-[12px] p-[12px] w-[206px] bg-newBgColorInner"
                   >

@@ -8,7 +8,8 @@ import Link from 'next/link';
 import { CommentsComponents } from '@gitroom/frontend/components/preview/comments.components';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
-import { VideoOrImage } from '@gitroom/react/helpers/video.or.image';
+import { SharedVideoPlayer } from '@gitroom/react/helpers/shared.video.player';
+import { hasExtension } from '@gitroom/helpers/utils/has.extension';
 import { CopyClient } from '@gitroom/frontend/components/preview/copy.client';
 import { getT } from '@gitroom/react/translation/get.translation.service.backend';
 import { RenderPreviewDateClient } from '@gitroom/frontend/components/preview/render.preview.date.client';
@@ -158,16 +159,24 @@ export default async function Auth(
                         }}
                       />
                       <div className="flex w-full gap-[10px]">
-                        {JSON.parse(p?.image || '[]').map((p: any) => (
+                        {JSON.parse(p?.image || '[]').map((media: any) => (
                           <div
-                            key={p.name}
+                            key={media.name}
                             className="flex-1 rounded-[10px] max-h-[500px] overflow-hidden"
                           >
-                            <VideoOrImage
-                              isContain={true}
-                              src={p.path}
-                              autoplay={true}
-                            />
+                            {hasExtension(media.path, 'mp4') ? (
+                              <SharedVideoPlayer
+                                src={media.path}
+                                autoplayMuted={true}
+                                videoClassName="object-contain"
+                              />
+                            ) : (
+                              <SafeImage
+                                alt="Media image"
+                                className="object-contain w-full h-full"
+                                src={media.path}
+                              />
+                            )}
                           </div>
                         ))}
                       </div>

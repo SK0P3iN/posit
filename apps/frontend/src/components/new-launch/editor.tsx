@@ -67,6 +67,7 @@ import {
   DelayIcon,
 } from '@gitroom/frontend/components/ui/icons';
 import { DelayComponent } from '@gitroom/frontend/components/new-launch/delay.component';
+import { MediaMissingBadge } from '@gitroom/frontend/components/media/media.missing.badge';
 
 const MAX_UPLOAD_SIZE = 1024 * 1024 * 1024; // 1 GB
 
@@ -357,6 +358,10 @@ export const EditorWrapper: FC<{
     return null;
   }
 
+  const editorHasMediaMissing = existingData?.posts?.some(
+    (post) => post.mediaMissing
+  );
+
   return (
     <div
       className={clsx(
@@ -366,6 +371,11 @@ export const EditorWrapper: FC<{
           'bg-newSettings rounded-[12px]'
       )}
     >
+      {editorHasMediaMissing && (
+        <div className="px-[12px] pt-[12px]">
+          <MediaMissingBadge variant="inline" />
+        </div>
+      )}
       {isCreateSet && current !== 'global' && (
         <>
           <div className="text-center absolute w-full h-full left-0 top-0 items-center justify-center flex z-[101] flex-col gap-[16px]">

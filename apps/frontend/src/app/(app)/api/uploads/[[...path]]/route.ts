@@ -36,20 +36,39 @@ export const GET = async (
   if (filePath !== base && !filePath.startsWith(base + sep)) {
     return new NextResponse('Not found', { status: 404 });
   }
-  const response = createReadStream(filePath);
   const fileStats = statSync(filePath);
   const contentType = mime.getType(filePath) || 'application/octet-stream';
+
+  // Honor ranged requests so browsers can seek video on local storage
+  // (and providers that download media in byte windows).
+  const range = /^bytes=(\d+)-(\d*)$/.exec(request.headers.get('range') || '');
+  const start = range ? Number(range[1]) : 0;
+  const end = range && range[2] ? Number(range[2]) : fileStats.size - 1;
+
+  if (
+    range &&
+    (start >= fileStats.size || end >= fileStats.size || start > end)
+  ) {
+    return new NextResponse(null, {
+      status: 416,
+      headers: { 'Content-Range': `bytes */${fileStats.size}` },
+    });
+  }
+
+  const response = createReadStream(filePath, range ? { start, end } : {});
   const iterator = nodeStreamToIterator(response);
   const webStream = iteratorToStream(iterator);
   return new Response(webStream, {
+    status: range ? 206 : 200,
     headers: {
       'Content-Type': contentType,
-      // Set the appropriate content-type header
-      'Content-Length': fileStats.size.toString(),
-      // Set the content-length header
+      'Content-Length': (end - start + 1).toString(),
       'Last-Modified': fileStats.mtime.toUTCString(),
-      // Set the last-modified header
-      'Cache-Control': 'public, max-age=31536000, immutable', // Example cache-control header
+      'Cache-Control': 'public, max-age=31536000, immutable',
+      'Accept-Ranges': 'bytes',
+      ...(range
+        ? { 'Content-Range': `bytes ${start}-${end}/${fileStats.size}` }
+        : {}),
     },
   });
 };

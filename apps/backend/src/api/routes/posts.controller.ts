@@ -64,6 +64,14 @@ export class PostsController {
     return this._postsService.updateReleaseId(org.id, id, releaseId);
   }
 
+  @Post('/:id/confirm-published')
+  async confirmAlreadyLive(
+    @GetOrgFromRequest() org: Organization,
+    @Param('id') id: string
+  ) {
+    return this._postsService.confirmAlreadyLive(org.id, id);
+  }
+
   @Post('/should-shortlink')
   async shouldShortlink(@Body() body: { messages: string[] }) {
     return { ask: this._shortLinkService.askShortLinkedin(body.messages) };

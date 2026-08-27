@@ -15,6 +15,24 @@ export class InfiniteWorkflowRegister implements OnModuleInit {
             taskQueue: 'main',
           });
       } catch (err) {}
+
+      try {
+        await this._temporalService.client
+          ?.getRawClient()
+          ?.workflow?.start('mediaTrashPurgeWorkflow', {
+            workflowId: 'media-trash-purge-workflow',
+            taskQueue: 'main',
+          });
+      } catch (err) {}
+
+      try {
+        await this._temporalService.client
+          ?.getRawClient()
+          ?.workflow?.start('inboxSyncWorkflow', {
+            workflowId: 'inbox-sync-workflow',
+            taskQueue: 'main',
+          });
+      } catch (err) {}
     }
   }
 }

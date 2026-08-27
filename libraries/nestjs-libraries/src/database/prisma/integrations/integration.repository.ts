@@ -189,6 +189,7 @@ export class IntegrationRepository {
         ...params,
         disabled: false,
         deletedAt: null,
+        refreshNeeded: false,
       },
     });
   }
@@ -493,6 +494,22 @@ export class IntegrationRepository {
         customer: true,
       },
     });
+  }
+
+  getOrganizationIdsWithActiveSocial() {
+    return this._integration.model.integration
+      .findMany({
+        where: {
+          deletedAt: null,
+          disabled: false,
+          type: 'social',
+        },
+        select: {
+          organizationId: true,
+        },
+        distinct: ['organizationId'],
+      })
+      .then((rows) => rows.map((r) => r.organizationId));
   }
 
   async disableChannel(org: string, id: string) {

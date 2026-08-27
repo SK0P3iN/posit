@@ -182,9 +182,17 @@ export class PublicController {
         return res.status(400).send('Blocked URL');
       }
 
+      const clientRange = req.headers.range;
+      const rangeHeader =
+        typeof clientRange === 'string' &&
+        /^bytes=\d+-\d*$/.test(clientRange)
+          ? clientRange
+          : undefined;
+
       r = await fetch(currentUrl, {
         signal: ac.signal,
         redirect: 'manual',
+        headers: rangeHeader ? { Range: rangeHeader } : undefined,
         // @ts-ignore — undici option, not in lib.dom fetch types
         dispatcher: ssrfSafeDispatcher,
       });

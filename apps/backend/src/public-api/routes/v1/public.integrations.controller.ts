@@ -62,6 +62,9 @@ import { RefreshToken } from '@gitroom/nestjs-libraries/integrations/social.abst
 import { PostValidationException } from '@gitroom/backend/api/routes/posts.validation.exception';
 import { timer } from '@gitroom/helpers/utils/timer';
 import { ioRedis } from '@gitroom/nestjs-libraries/redis/redis.service';
+import { InboxService } from '@gitroom/nestjs-libraries/database/prisma/inbox/inbox.service';
+import { GetInboxDto } from '@gitroom/nestjs-libraries/dtos/inbox/get.inbox.dto';
+import { ReplyInboxDto } from '@gitroom/nestjs-libraries/dtos/inbox/reply.inbox.dto';
 
 @ApiTags('Public API')
 @Controller('/public/v1')
@@ -74,7 +77,8 @@ export class PublicIntegrationsController {
     private _mediaService: MediaService,
     private _notificationService: NotificationService,
     private _integrationManager: IntegrationManager,
-    private _refreshIntegrationService: RefreshIntegrationService
+    private _refreshIntegrationService: RefreshIntegrationService,
+    private _inboxService: InboxService
   ) {}
 
   @Post('/upload')
@@ -181,6 +185,24 @@ export class PublicIntegrationsController {
       posts,
       // comments,
     };
+  }
+
+  @Get('/posts/group/:group')
+  getPostsByGroup(
+    @GetOrgFromRequest() org: Organization,
+    @Param('group') group: string
+  ) {
+    Sentry.metrics.count('public_api-request', 1);
+    return this._postsService.getPostsByGroup(org.id, group);
+  }
+
+  @Post('/posts/valid')
+  validatePosts(
+    @GetOrgFromRequest() org: Organization,
+    @Body() rawBody: { posts?: any[] }
+  ) {
+    Sentry.metrics.count('public_api-request', 1);
+    return this._postsService.validatePosts(org.id, rawBody?.posts || []);
   }
 
   @Post('/posts')
@@ -492,6 +514,107 @@ export class PublicIntegrationsController {
   ) {
     Sentry.metrics.count('public_api-request', 1);
     return this._postsService.updateReleaseId(org.id, id, releaseId);
+  }
+
+  @Put('/posts/:id/date')
+  changePostDate(
+    @GetOrgFromRequest() org: Organization,
+    @Param('id') id: string,
+    @Body('date') date: string,
+    @Body('action') action: 'schedule' | 'update' = 'schedule'
+  ) {
+    Sentry.metrics.count('public_api-request', 1);
+    return this._postsService.changeDate(org.id, id, date, action);
+  }
+
+  @Get('/media')
+  getMedia(
+    @GetOrgFromRequest() org: Organization,
+    @Query('page') page: number,
+    @Query('search') search?: string,
+    @Query('folderId') folderId?: string,
+    @Query('unfiled') unfiled?: string,
+    @Query('usage') usage?: 'unused' | 'detached'
+  ) {
+    Sentry.metrics.count('public_api-request', 1);
+    return this._mediaService.getMedia(
+      org.id,
+      page,
+      search,
+      folderId || undefined,
+      unfiled === 'true',
+      usage === 'unused' || usage === 'detached' ? usage : undefined
+    );
+  }
+
+  @Get('/media/folders')
+  getMediaFolders(@GetOrgFromRequest() org: Organization) {
+    Sentry.metrics.count('public_api-request', 1);
+    return this._mediaService.getFolders(org.id);
+  }
+
+  @Get('/inbox/capabilities')
+  inboxCapabilities(@GetOrgFromRequest() org: Organization) {
+    Sentry.metrics.count('public_api-request', 1);
+    return this._inboxService.listChannelCapabilities(org.id);
+  }
+
+  @Get('/inbox/sync-status')
+  inboxSyncStatus(@GetOrgFromRequest() org: Organization) {
+    Sentry.metrics.count('public_api-request', 1);
+    return this._inboxService.getSyncStatus(org.id);
+  }
+
+  @Post('/inbox/sync')
+  inboxSync(@GetOrgFromRequest() org: Organization) {
+    Sentry.metrics.count('public_api-request', 1);
+    return this._inboxService.syncOrganization(org.id);
+  }
+
+  @Get('/inbox')
+  inboxList(
+    @GetOrgFromRequest() org: Organization,
+    @Query() query: GetInboxDto
+  ) {
+    Sentry.metrics.count('public_api-request', 1);
+    return this._inboxService.list(org.id, query);
+  }
+
+  @Get('/inbox/:id')
+  inboxGet(
+    @GetOrgFromRequest() org: Organization,
+    @Param('id') id: string
+  ) {
+    Sentry.metrics.count('public_api-request', 1);
+    return this._inboxService.getById(org.id, id);
+  }
+
+  @Put('/inbox/:id/read')
+  inboxMarkRead(
+    @GetOrgFromRequest() org: Organization,
+    @Param('id') id: string
+  ) {
+    Sentry.metrics.count('public_api-request', 1);
+    return this._inboxService.markRead(org.id, id);
+  }
+
+  @Post('/inbox/:id/reply')
+  inboxReply(
+    @GetOrgFromRequest() org: Organization,
+    @Param('id') id: string,
+    @Body() body: ReplyInboxDto
+  ) {
+    Sentry.metrics.count('public_api-request', 1);
+    return this._inboxService.reply(org.id, id, body.message);
+  }
+
+  @Delete('/inbox/:id')
+  inboxDelete(
+    @GetOrgFromRequest() org: Organization,
+    @Param('id') id: string
+  ) {
+    Sentry.metrics.count('public_api-request', 1);
+    return this._inboxService.deleteItem(org.id, id);
   }
 
   @Get('/analytics/:integration')

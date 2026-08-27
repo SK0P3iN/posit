@@ -5,6 +5,7 @@ import {
   Get,
   Param,
   Post,
+  Put,
   Query,
   Req,
   Res,
@@ -25,6 +26,14 @@ import { UploadFactory } from '@gitroom/nestjs-libraries/upload/upload.factory';
 import { SaveMediaInformationDto } from '@gitroom/nestjs-libraries/dtos/media/save.media.information.dto';
 import { VideoDto } from '@gitroom/nestjs-libraries/dtos/videos/video.dto';
 import { VideoFunctionDto } from '@gitroom/nestjs-libraries/dtos/videos/video.function.dto';
+import { CreateMediaFolderDto } from '@gitroom/nestjs-libraries/dtos/media/create.media.folder.dto';
+import { RenameMediaFolderDto } from '@gitroom/nestjs-libraries/dtos/media/rename.media.folder.dto';
+import { MoveMediaDto } from '@gitroom/nestjs-libraries/dtos/media/move.media.dto';
+import {
+  BulkDeleteMediaDto,
+  MediaIdsDto,
+  RestoreMediaDto,
+} from '@gitroom/nestjs-libraries/dtos/media/bulk.media.dto';
 
 @ApiTags('Media')
 @Controller('/media')
@@ -35,9 +44,101 @@ export class MediaController {
     private _subscriptionService: SubscriptionService
   ) {}
 
+  @Get('/folders')
+  getFolders(@GetOrgFromRequest() org: Organization) {
+    return this._mediaService.getFolders(org.id);
+  }
+
+  @Get('/folders/trash')
+  getTrashedFolders(@GetOrgFromRequest() org: Organization) {
+    return this._mediaService.getTrashedFolders(org.id);
+  }
+
+  @Post('/folders')
+  createFolder(
+    @GetOrgFromRequest() org: Organization,
+    @Body() body: CreateMediaFolderDto
+  ) {
+    return this._mediaService.createFolder(org.id, body);
+  }
+
+  @Put('/folders/:id')
+  renameFolder(
+    @GetOrgFromRequest() org: Organization,
+    @Param('id') id: string,
+    @Body() body: RenameMediaFolderDto
+  ) {
+    return this._mediaService.renameFolder(org.id, id, body.name);
+  }
+
+  @Delete('/folders/:id')
+  deleteFolder(
+    @GetOrgFromRequest() org: Organization,
+    @Param('id') id: string,
+    @Query('confirm') confirm?: string
+  ) {
+    return this._mediaService.deleteFolder(org.id, id, confirm === 'true');
+  }
+
+  @Post('/move')
+  moveMedia(
+    @GetOrgFromRequest() org: Organization,
+    @Body() body: MoveMediaDto
+  ) {
+    return this._mediaService.moveMedia(
+      org.id,
+      body.ids,
+      body.folderId ?? null
+    );
+  }
+
+  @Post('/usage')
+  getMediaUsage(
+    @GetOrgFromRequest() org: Organization,
+    @Body() body: MediaIdsDto
+  ) {
+    return this._mediaService.getMediaUsage(org.id, body.ids);
+  }
+
+  @Post('/bulk')
+  bulkDeleteMedia(
+    @GetOrgFromRequest() org: Organization,
+    @Body() body: BulkDeleteMediaDto
+  ) {
+    return this._mediaService.bulkDeleteMedia(
+      org.id,
+      body.ids,
+      body.confirm === true
+    );
+  }
+
+  @Get('/trash')
+  getTrash(
+    @GetOrgFromRequest() org: Organization,
+    @Query('page') page: number
+  ) {
+    return this._mediaService.getTrash(org.id, page);
+  }
+
+  @Post('/restore')
+  restore(
+    @GetOrgFromRequest() org: Organization,
+    @Body() body: RestoreMediaDto
+  ) {
+    return this._mediaService.restore(org.id, body.mediaIds, body.folderIds);
+  }
+
   @Delete('/:id')
-  deleteMedia(@GetOrgFromRequest() org: Organization, @Param('id') id: string) {
-    return this._mediaService.deleteMedia(org.id, id);
+  deleteMedia(
+    @GetOrgFromRequest() org: Organization,
+    @Param('id') id: string,
+    @Query('confirm') confirm?: string
+  ) {
+    return this._mediaService.bulkDeleteMedia(
+      org.id,
+      [id],
+      confirm === 'true'
+    );
   }
 
   @Post('/generate-video')
@@ -89,7 +190,8 @@ export class MediaController {
   @UsePipes(new CustomFileValidationPipe())
   async uploadServer(
     @GetOrgFromRequest() org: Organization,
-    @UploadedFile() file: Express.Multer.File
+    @UploadedFile() file: Express.Multer.File,
+    @Body('folderId') folderId?: string
   ) {
     const originalName = file?.originalname || '';
     const uploadedFile = await this.storage.uploadFile(file);
@@ -97,7 +199,8 @@ export class MediaController {
       org.id,
       uploadedFile.originalname,
       uploadedFile.path,
-      originalName
+      originalName,
+      folderId || undefined
     );
   }
 
@@ -106,7 +209,8 @@ export class MediaController {
     @GetOrgFromRequest() org: Organization,
     @Req() req: Request,
     @Body('name') name: string,
-    @Body('originalName') originalName: string
+    @Body('originalName') originalName: string,
+    @Body('folderId') folderId?: string
   ) {
     if (!name) {
       return false;
@@ -115,7 +219,8 @@ export class MediaController {
       org.id,
       name,
       process.env.CLOUDFLARE_BUCKET_URL + '/' + name,
-      originalName || undefined
+      originalName || undefined,
+      folderId || undefined
     );
   }
 
@@ -133,7 +238,8 @@ export class MediaController {
   async uploadSimple(
     @GetOrgFromRequest() org: Organization,
     @UploadedFile('file') file: Express.Multer.File,
-    @Body('preventSave') preventSave: string = 'false'
+    @Body('preventSave') preventSave: string = 'false',
+    @Body('folderId') folderId?: string
   ) {
     const originalName = file.originalname;
     const getFile = await this.storage.uploadFile(file);
@@ -147,7 +253,8 @@ export class MediaController {
       org.id,
       getFile.originalname,
       getFile.path,
-      originalName
+      originalName,
+      folderId || undefined
     );
   }
 
@@ -166,13 +273,15 @@ export class MediaController {
     // @ts-ignore
     const name = upload.Location.split('/').pop();
     const originalName = req.body?.file?.name;
+    const folderId = req.body?.folderId;
 
     const saveFile = await this._mediaService.saveFile(
       org.id,
       name,
       // @ts-ignore
       upload.Location,
-      originalName || undefined
+      originalName || undefined,
+      folderId || undefined
     );
 
     res.status(200).json({ ...upload, saved: saveFile });
@@ -182,9 +291,19 @@ export class MediaController {
   getMedia(
     @GetOrgFromRequest() org: Organization,
     @Query('page') page: number,
-    @Query('search') search?: string
+    @Query('search') search?: string,
+    @Query('folderId') folderId?: string,
+    @Query('unfiled') unfiled?: string,
+    @Query('usage') usage?: 'unused' | 'detached'
   ) {
-    return this._mediaService.getMedia(org.id, page, search);
+    return this._mediaService.getMedia(
+      org.id,
+      page,
+      search,
+      folderId || undefined,
+      unfiled === 'true',
+      usage === 'unused' || usage === 'detached' ? usage : undefined
+    );
   }
 
   @Get('/video-options')

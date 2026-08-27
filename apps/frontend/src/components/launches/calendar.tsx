@@ -58,6 +58,10 @@ import copy from 'copy-to-clipboard';
 import { stripHtmlValidation } from '@gitroom/helpers/utils/strip.html.validation';
 import { newDayjs } from '@gitroom/frontend/components/layout/set.timezone';
 import { Button } from '@gitroom/react/form/button';
+import {
+  MediaMissingBadge,
+  mediaMissingRingClass,
+} from '@gitroom/frontend/components/media/media.missing.badge';
 
 // Extend dayjs with necessary plugins
 extend(isSameOrAfter);
@@ -1012,6 +1016,34 @@ const CalendarItem: FC<{
     user?.impersonate &&
     post.creationMethod &&
     post.creationMethod !== 'UNKNOWN';
+  const isUnconfirmed =
+    state === 'ERROR' &&
+    typeof post.error === 'string' &&
+    post.error.startsWith('UNCONFIRMED:');
+  const isAuthHeld =
+    state === 'QUEUE' &&
+    !!post.integration?.refreshNeeded &&
+    isBeforeNow;
+  const isContentError = state === 'ERROR' && !isUnconfirmed;
+  const statusTooltip = isUnconfirmed
+    ? post.error?.replace(/^UNCONFIRMED:\s*/, '') ||
+      t(
+        'unconfirmed_post_tooltip',
+        'Could not confirm publish — check the channel before posting again'
+      )
+    : isAuthHeld
+    ? post.error?.replace(/^AUTH_HOLD:\s*/, '') ||
+      t(
+        'auth_held_post_tooltip',
+        'Held — reconnect the channel to publish'
+      )
+    : isContentError
+    ? post.error ||
+      t(
+        'post_publish_error_tooltip',
+        'An error occurred while publishing this post'
+      )
+    : null;
   const preview = useCallback(() => {
     window.open(`/p/` + post.id + '?share=true', '_blank');
   }, [post]);
@@ -1036,21 +1068,29 @@ const CalendarItem: FC<{
       className={clsx(
         'w-full flex h-full flex-1 flex-col group',
         'relative',
-        state === 'ERROR' && 'rounded-[10px] ring-2 ring-red-500'
+        isContentError && 'rounded-[10px] ring-2 ring-red-500',
+        isUnconfirmed && 'rounded-[10px] ring-2 ring-amber-400',
+        isAuthHeld && 'rounded-[10px] ring-2 ring-amber-500',
+        post.mediaMissing && mediaMissingRingClass
       )}
       style={{
         opacity,
       }}
     >
-      {state === 'ERROR' && (
+      {statusTooltip && (
         <div
-          className="absolute -top-[6px] -left-[6px] z-20 w-[18px] h-[18px] rounded-full bg-red-500 flex items-center justify-center text-white text-[11px] font-bold cursor-pointer"
+          className={clsx(
+            'absolute -top-[6px] -left-[6px] z-20 w-[18px] h-[18px] rounded-full flex items-center justify-center text-white text-[11px] font-bold cursor-pointer',
+            isContentError && 'bg-red-500',
+            (isUnconfirmed || isAuthHeld) && 'bg-amber-500'
+          )}
           data-tooltip-id="tooltip"
-          data-tooltip-content={post.error || 'An error occurred while publishing this post'}
+          data-tooltip-content={statusTooltip}
         >
           !
         </div>
       )}
+      {post.mediaMissing && <MediaMissingBadge />}
       {showCreationMethodBadge && (
         <div className="absolute -bottom-[4px] -right-[4px] z-10">
           <CreationMethodBadge

@@ -89,6 +89,9 @@ export const getUppyUploadPlugin = (
             fetchUploadApiEndpoint(fetch, 'complete-multipart-upload', {
               file,
               ...props,
+              ...(file?.meta?.folderId
+                ? { folderId: file.meta.folderId }
+                : {}),
             }),
         },
       };
@@ -98,6 +101,7 @@ export const getUppyUploadPlugin = (
         options: {
           endpoint: `${backendUrl}/media/upload-server`,
           withCredentials: true,
+          allowedMetaFields: ['folderId'],
         },
       };
 

@@ -1,0 +1,261 @@
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import {
+  InboxRepository,
+  UpsertInboxItemInput,
+} from '@gitroom/nestjs-libraries/database/prisma/inbox/inbox.repository';
+import { InboxItemType, Integration } from '@prisma/client';
+import { IntegrationManager } from '@gitroom/nestjs-libraries/integrations/integration.manager';
+import { IntegrationService } from '@gitroom/nestjs-libraries/database/prisma/integrations/integration.service';
+import { ioRedis } from '@gitroom/nestjs-libraries/redis/redis.service';
+import { RefreshToken } from '@gitroom/nestjs-libraries/integrations/social.abstract';
+
+@Injectable()
+export class InboxService {
+  constructor(
+    private _inboxRepository: InboxRepository,
+    private _integrationManager: IntegrationManager,
+    private _integrationService: IntegrationService
+  ) {}
+
+  list(
+    orgId: string,
+    query: {
+      page?: number;
+      limit?: number;
+      type?: InboxItemType;
+      integrationId?: string;
+      unreadOnly?: boolean;
+    }
+  ) {
+    return this._inboxRepository.list(orgId, query);
+  }
+
+  async getById(orgId: string, id: string) {
+    const item = await this._inboxRepository.getById(orgId, id);
+    if (!item) {
+      throw new NotFoundException('Inbox item not found');
+    }
+    return item;
+  }
+
+  async markRead(orgId: string, id: string) {
+    await this.getById(orgId, id);
+    await this._inboxRepository.markRead(orgId, id);
+    return this.getById(orgId, id);
+  }
+
+  async deleteItem(orgId: string, id: string) {
+    await this.getById(orgId, id);
+    await this._inboxRepository.softDelete(orgId, id);
+    return { id, deleted: true };
+  }
+
+  upsertItems(items: UpsertInboxItemInput[]) {
+    return Promise.all(items.map((item) => this._inboxRepository.upsertItem(item)));
+  }
+
+  async getSyncStatus(orgId: string) {
+    const raw = await ioRedis.get(`inbox:sync:${orgId}`);
+    if (!raw) {
+      return { status: 'idle' as const, error: null, syncedAt: null };
+    }
+    try {
+      return JSON.parse(raw) as {
+        status: 'ok' | 'error' | 'idle';
+        error: string | null;
+        syncedAt: string | null;
+      };
+    } catch {
+      return { status: 'idle' as const, error: null, syncedAt: null };
+    }
+  }
+
+  async setSyncStatus(
+    orgId: string,
+    status: 'ok' | 'error' | 'idle',
+    error?: string | null
+  ) {
+    await ioRedis.set(
+      `inbox:sync:${orgId}`,
+      JSON.stringify({
+        status,
+        error: error || null,
+        syncedAt: new Date().toISOString(),
+      }),
+      'EX',
+      7 * 24 * 60 * 60
+    );
+  }
+
+  capabilitiesForProvider(providerIdentifier: string) {
+    const provider =
+      this._integrationManager.getSocialIntegration(providerIdentifier);
+    const caps = provider?.inboxCapabilities?.() || {
+      comments: false,
+      mentions: false,
+      dms: false,
+      embeddable: false,
+    };
+    return {
+      providerIdentifier,
+      ...caps,
+      supported: !!(caps.comments || caps.mentions || caps.dms),
+    };
+  }
+
+  async listChannelCapabilities(orgId: string) {
+    const integrations = await this._integrationService.getIntegrationsList(
+      orgId
+    );
+    return integrations
+      .filter((i) => !i.disabled && !i.deletedAt)
+      .map((i) => ({
+        integrationId: i.id,
+        name: i.name,
+        providerIdentifier: i.providerIdentifier,
+        refreshNeeded: i.refreshNeeded,
+        ...this.capabilitiesForProvider(i.providerIdentifier),
+      }));
+  }
+
+  async syncOrganization(orgId: string) {
+    const integrations = (
+      await this._integrationService.getIntegrationsList(orgId)
+    ).filter((i) => !i.disabled && !i.deletedAt && !i.refreshNeeded);
+
+    let upserted = 0;
+    const errors: string[] = [];
+
+    for (const integration of integrations) {
+      try {
+        upserted += await this.syncIntegration(integration);
+      } catch (err) {
+        if (err instanceof RefreshToken) {
+          await this._integrationService.disconnectChannel(orgId, integration);
+          errors.push(
+            `${integration.name}: reconnect required (${err.message || 'token'})`
+          );
+          continue;
+        }
+        errors.push(
+          `${integration.name}: ${
+            err instanceof Error ? err.message : 'sync failed'
+          }`
+        );
+      }
+    }
+
+    if (errors.length) {
+      await this.setSyncStatus(orgId, 'error', errors.join('; '));
+    } else {
+      await this.setSyncStatus(orgId, 'ok');
+    }
+
+    return { upserted, errors };
+  }
+
+  async syncIntegration(integration: Integration) {
+    const provider = this._integrationManager.getSocialIntegration(
+      integration.providerIdentifier
+    );
+    if (!provider?.fetchInboxItems) {
+      return 0;
+    }
+
+    const remoteItems = await provider.fetchInboxItems(
+      integration.token,
+      integration
+    );
+
+    const mapped: UpsertInboxItemInput[] = (remoteItems || []).map((item) => ({
+      organizationId: integration.organizationId,
+      integrationId: integration.id,
+      type: item.type,
+      remoteId: item.remoteId,
+      threadKey: item.threadKey,
+      authorName: item.authorName,
+      authorId: item.authorId,
+      authorPicture: item.authorPicture,
+      body: item.body,
+      replyCapable: !!item.replyCapable,
+      remoteUrl: item.remoteUrl,
+      remoteCreatedAt: item.remoteCreatedAt
+        ? new Date(item.remoteCreatedAt)
+        : null,
+    }));
+
+    if (!mapped.length) {
+      return 0;
+    }
+
+    await this.upsertItems(mapped);
+    return mapped.length;
+  }
+
+  async reply(orgId: string, id: string, message: string) {
+    const trimmed = (message || '').trim();
+    if (!trimmed) {
+      throw new BadRequestException('Reply message is required');
+    }
+
+    const item = await this.getById(orgId, id);
+    if (!item.replyCapable) {
+      throw new BadRequestException('This inbox item cannot be replied to');
+    }
+
+    if (item.integration.refreshNeeded || item.integration.disabled) {
+      throw new BadRequestException(
+        'Reconnect the channel before replying to inbox items'
+      );
+    }
+
+    const fullIntegration = await this._integrationService.getIntegrationById(
+      orgId,
+      item.integrationId
+    );
+    if (!fullIntegration) {
+      throw new NotFoundException('Channel not found');
+    }
+
+    const provider = this._integrationManager.getSocialIntegration(
+      fullIntegration.providerIdentifier
+    );
+    if (!provider?.replyToInboxItem) {
+      throw new BadRequestException(
+        'This channel does not support inbox replies'
+      );
+    }
+
+    try {
+      const result = await provider.replyToInboxItem(
+        fullIntegration.token,
+        {
+          type: item.type,
+          remoteId: item.remoteId,
+          threadKey: item.threadKey,
+          authorId: item.authorId,
+        },
+        trimmed,
+        fullIntegration
+      );
+
+      await this._inboxRepository.markRead(orgId, id);
+      return { id, replyRemoteId: result?.remoteId || null };
+    } catch (err) {
+      if (err instanceof RefreshToken) {
+        await this._integrationService.disconnectChannel(
+          orgId,
+          fullIntegration
+        );
+        throw new BadRequestException(
+          'Reconnect the channel before replying to inbox items'
+        );
+      }
+      throw err;
+    }
+  }
+}

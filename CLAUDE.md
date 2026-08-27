@@ -15,6 +15,8 @@ We have 3 important folders
 - apps/orchestrator - this is temporal, it's for background jobs (NESTJS) it contains all the workflows and activities
 - apps/frontend - this is the code of the frontend (Vite ReactJS)
 - /libraries contains a lot of services shared between backend and orchestrator and frontend components.
+- docs/solutions/ — documented solutions to past problems (bugs, patterns), organized by category with YAML frontmatter (module, tags, problem_type). Relevant when implementing or debugging in documented areas.
+- CONCEPTS.md — shared domain vocabulary (entities, named processes, status concepts). Relevant when orienting to the codebase or discussing domain concepts.
 
 We are using only pnpm, don't use any other dependency manager.
 Never install frontend components from npmjs, focus on writing native components.

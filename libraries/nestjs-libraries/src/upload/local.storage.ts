@@ -114,15 +114,41 @@ export class LocalStorage implements IUploadProvider {
   }
 
   async removeFile(filePath: string): Promise<void> {
-    // Logic to remove the file from the filesystem goes here
-    return new Promise((resolve, reject) => {
-      unlink(filePath, (err) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve();
+    const diskPath = this.resolveDiskPath(filePath);
+    if (!diskPath) {
+      return;
+    }
+
+    return new Promise((resolve) => {
+      unlink(diskPath, (err) => {
+        if (err && (err as NodeJS.ErrnoException).code !== 'ENOENT') {
+          console.error('Error removing file from local storage:', err);
         }
+        resolve();
       });
     });
+  }
+
+  private resolveDiskPath(filePath: string): string | null {
+    if (!filePath) {
+      return null;
+    }
+
+    if (filePath.indexOf('http') === 0) {
+      const uploadsIndex = filePath.indexOf('/uploads');
+      if (uploadsIndex === -1) {
+        return null;
+      }
+
+      return `${this.uploadDirectory}${filePath.slice(
+        uploadsIndex + '/uploads'.length
+      )}`;
+    }
+
+    if (filePath.startsWith('/')) {
+      return `${this.uploadDirectory}${filePath}`;
+    }
+
+    return filePath;
   }
 }

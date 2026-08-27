@@ -273,7 +273,19 @@ export type CompanionDerivationContext = {
   settings: any;
   media: MediaContent[];
   /** The existing companion row for this Feed post, if one already exists. */
-  existingCompanion?: { id: string; state: string; releaseId: string | null } | null;
+  /**
+   * `inFlight` mirrors PostsService's `post:inflight:{id}` Redis marker
+   * (irreversible remote step started, publish not yet confirmed) for this
+   * companion — computed by the generic caller (posts.service.ts, which
+   * owns that key) so a provider hook never needs its own Redis access or
+   * knowledge of the key format.
+   */
+  existingCompanion?: {
+    id: string;
+    state: string;
+    releaseId: string | null;
+    inFlight: boolean;
+  } | null;
 };
 
 /**
@@ -296,6 +308,7 @@ export type InboxCapabilities = {
   comments: boolean;
   mentions: boolean;
   dms: boolean;
+  embeddable: boolean;
 };
 
 export type FetchedInboxItem = {

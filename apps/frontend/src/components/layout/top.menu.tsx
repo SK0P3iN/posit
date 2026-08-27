@@ -115,6 +115,27 @@ export const useMenuItem = () => {
       path: '/media',
     },
     {
+      name: t('inbox', 'Inbox'),
+      icon: (
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="20"
+          height="21"
+          viewBox="0 0 20 21"
+          fill="none"
+        >
+          <path
+            d="M3.33325 6.33334L9.07515 10.1583C9.63502 10.5315 10.3648 10.5315 10.9247 10.1583L16.6666 6.33334M4.66659 16.3333H15.3333C16.0696 16.3333 16.6666 15.7363 16.6666 15V6.99999C16.6666 6.26361 16.0696 5.66666 15.3333 5.66666H4.66659C3.93021 5.66666 3.33325 6.26361 3.33325 6.99999V15C3.33325 15.7363 3.93021 16.3333 4.66659 16.3333Z"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      ),
+      path: '/inbox',
+    },
+    {
       name: t('plugs', 'Plugs'),
       icon: (
         <svg

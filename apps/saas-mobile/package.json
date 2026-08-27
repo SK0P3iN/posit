@@ -1,0 +1,14 @@
+{
+  "name": "postiz-saas-mobile",
+  "version": "1.0.0",
+  "description": "Mobile-first SaaS frontend for Postiz headless backend",
+  "type": "module",
+  "scripts": {
+    "dev": "dotenv -e ../../.env -- vite --port 4210",
+    "build": "vite build",
+    "preview": "vite preview --port 4210"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}

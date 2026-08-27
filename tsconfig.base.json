@@ -33,7 +33,9 @@
       "@gitroom/react/*": ["libraries/react-shared-libraries/src/*"],
       "@gitroom/plugins/*": ["libraries/plugins/src/*"],
       "@gitroom/orchestrator/*": ["apps/orchestrator/src/*"],
-      "@gitroom/extension/*": ["apps/extension/src/*"]
+      "@gitroom/extension/*": ["apps/extension/src/*"],
+      "@gitroom/saas-bff/*": ["apps/saas-bff/src/*"],
+      "@gitroom/saas-mobile/*": ["apps/saas-mobile/src/*"]
     }
   },
   "exclude": ["node_modules", "tmp"]

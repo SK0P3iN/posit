@@ -1,6 +1,11 @@
 import { timer } from '@gitroom/helpers/utils/timer';
 import { Integration } from '@prisma/client';
-import { PendingCheckResponse } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
+import {
+  FetchedInboxItem,
+  InboxCapabilities,
+  InboxReplyTarget,
+  PendingCheckResponse,
+} from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
 import { ApplicationFailure } from '@temporalio/activity';
 import { readOrFetch } from '@gitroom/helpers/utils/read.or.fetch';
 import { getSsrfSafeDispatcher } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
@@ -149,6 +154,31 @@ export abstract class SocialAbstract {
       '{}',
       '{}',
       'finalizePost is not implemented for this provider'
+    );
+  }
+
+  public inboxCapabilities(): InboxCapabilities {
+    return { comments: false, mentions: false, dms: false, embeddable: false };
+  }
+
+  public async fetchInboxItems(
+    _accessToken: string,
+    _integration: Integration
+  ): Promise<FetchedInboxItem[]> {
+    return [];
+  }
+
+  public async replyToInboxItem(
+    _accessToken: string,
+    _item: InboxReplyTarget,
+    _message: string,
+    _integration: Integration
+  ): Promise<{ remoteId: string }> {
+    throw new BadBody(
+      this.identifier,
+      '{}',
+      '{}',
+      'Inbox replies are not supported for this channel'
     );
   }
 

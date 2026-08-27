@@ -20,12 +20,14 @@ const POST_ITEM_KEYS: Record<string, string> = {
   releaseURL: 'u',
   releaseId: 'ri',
   state: 's',
+  error: 'e',
   group: 'g',
   tags: 'tg',
   integration: 'n',
   intervalInDays: 'iv',
   actualDate: 'ad',
   creationMethod: 'cm',
+  mediaMissing: 'mm',
 };
 
 const INTEGRATION_KEYS: Record<string, string> = {
@@ -33,6 +35,7 @@ const INTEGRATION_KEYS: Record<string, string> = {
   providerIdentifier: 'pi',
   name: 'n',
   picture: 'p',
+  refreshNeeded: 'rn',
 };
 
 const TAG_KEYS: Record<string, string> = {

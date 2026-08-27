@@ -29,6 +29,8 @@ import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorato
 export class FacebookProvider extends SocialAbstract implements SocialProvider {
   identifier = 'facebook';
   name = 'Facebook Page';
+  toolTip =
+    'Your Facebook page selection is shared across all your Meta channels, check all relevant pages';
   isBetweenSteps = true;
   scopes = [
     'pages_show_list',
@@ -78,6 +80,14 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
       return {
         type: 'refresh-token' as const,
         value: 'Access token has been revoked, please re-authenticate',
+      };
+    }
+
+    if (/"code":\s*190\b/.test(body)) {
+      return {
+        type: 'refresh-token' as const,
+        value:
+          'The Facebook access token is invalid, please reconnect the channel',
       };
     }
 
@@ -245,6 +255,9 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
           `${process.env.FRONTEND_URL}/integrations/social/facebook`
         )}` +
         `&state=${state}` +
+        // Re-prompt permissions/assets the user previously declined, so a
+        // bad page grant can be repaired by reconnecting
+        `&auth_type=rerequest` +
         `&scope=${this.scopes.join(',')}`,
       codeVerifier: makeId(10),
       state,
@@ -385,7 +398,9 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
       // Business Manager API not available for all users
     }
 
-    return allPages;
+    // Pages without an access_token were never granted to the app in the
+    // OAuth dialog — publishing through them is impossible
+    return allPages.filter((p: any) => p.access_token);
   }
 
   async fetchPageInformation(accessToken: string, data: { page: string }) {
@@ -905,6 +920,60 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
         status: 'success',
       },
     ];
+  }
+
+  override inboxCapabilities() {
+    return { comments: true, mentions: false, dms: false, embeddable: true };
+  }
+
+  override async fetchInboxItems(
+    accessToken: string,
+    integration: Integration
+  ) {
+    const feed = await (
+      await this.fetch(
+        `https://graph.facebook.com/v20.0/${integration.internalId}/feed?fields=id,permalink_url,comments.limit(20){id,message,from,created_time}&limit=10&access_token=${accessToken}`
+      )
+    ).json();
+
+    const items = [];
+    for (const post of feed?.data || []) {
+      for (const comment of post?.comments?.data || []) {
+        items.push({
+          type: 'COMMENT' as const,
+          remoteId: String(comment.id),
+          threadKey: String(post.id),
+          authorName: comment.from?.name || null,
+          authorId: comment.from?.id || null,
+          body: comment.message || '',
+          replyCapable: true,
+          remoteUrl: post.permalink_url || null,
+          remoteCreatedAt: comment.created_time || null,
+        });
+      }
+    }
+    return items;
+  }
+
+  override async replyToInboxItem(
+    accessToken: string,
+    item: {
+      type: 'COMMENT' | 'MENTION' | 'DM';
+      remoteId: string;
+    },
+    message: string
+  ) {
+    const data = await (
+      await this.fetch(
+        `https://graph.facebook.com/v20.0/${item.remoteId}/comments?access_token=${accessToken}&fields=id`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message }),
+        }
+      )
+    ).json();
+    return { remoteId: String(data.id) };
   }
 
   async comment(

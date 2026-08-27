@@ -795,23 +795,30 @@ export class PostsService {
       return;
     }
 
-    const integration = await this._integrationService.getIntegrationById(
-      orgId,
-      postBody.integration.id
-    );
+    // Independent reads/writes — no data dependency on each other.
+    const [integration, existingCompanionRow, media] = await Promise.all([
+      this._integrationService.getIntegrationById(
+        orgId,
+        postBody.integration.id
+      ),
+      this._postRepository.getCompanionForPost(orgId, savedPost.id),
+      this.updateMedia(
+        savedPost.id,
+        (postBody.value || []).flatMap((v) => v.image || [])
+      ),
+    ]);
     if (!integration) {
       return;
     }
 
-    const existingCompanion = await this._postRepository.getCompanionForPost(
-      orgId,
-      savedPost.id
-    );
-
-    const media = await this.updateMedia(
-      savedPost.id,
-      (postBody.value || []).flatMap((v) => v.image || [])
-    );
+    const existingCompanion = !existingCompanionRow
+      ? null
+      : {
+          id: existingCompanionRow.id as string,
+          state: existingCompanionRow.state as string,
+          releaseId: existingCompanionRow.releaseId as string | null,
+          inFlight: !!(await this.getPostInFlight(existingCompanionRow.id)),
+        };
 
     let result;
     try {
@@ -878,14 +885,19 @@ export class PostsService {
       return;
     }
 
-    const existingCompanion = await this._postRepository.getCompanionForPost(
+    const existingCompanionRow = await this._postRepository.getCompanionForPost(
       orgId,
       rootPost.id
     );
 
-    if (!existingCompanion) {
+    if (!existingCompanionRow) {
       return;
     }
+
+    const existingCompanion = {
+      ...existingCompanionRow,
+      inFlight: !!(await this.getPostInFlight(existingCompanionRow.id)),
+    };
 
     let result;
     try {

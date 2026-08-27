@@ -928,4 +928,60 @@ export class XProvider extends SocialAbstract implements SocialProvider {
   mentionFormat(idOrHandle: string, name: string) {
     return `@${idOrHandle}`;
   }
+
+  override inboxCapabilities() {
+    return { comments: false, mentions: true, dms: false, embeddable: true };
+  }
+
+  override async fetchInboxItems(
+    accessToken: string,
+    integration: Integration
+  ) {
+    const client = await this.getClient(accessToken);
+    const timeline = await client.v2.userMentionTimeline(
+      integration.internalId,
+      {
+        max_results: 20,
+        'tweet.fields': ['created_at', 'author_id', 'conversation_id'],
+        expansions: ['author_id'],
+        'user.fields': ['name', 'username', 'profile_image_url'],
+      }
+    );
+
+    const users = new Map(
+      (timeline.includes?.users || []).map((u) => [u.id, u])
+    );
+
+    return (timeline.data.data || []).map((tweet) => {
+      const author = tweet.author_id ? users.get(tweet.author_id) : undefined;
+      return {
+        type: 'MENTION' as const,
+        remoteId: String(tweet.id),
+        threadKey: tweet.conversation_id || tweet.id,
+        authorName: author?.name || author?.username || null,
+        authorId: tweet.author_id || null,
+        authorPicture: author?.profile_image_url || null,
+        body: tweet.text || '',
+        replyCapable: true,
+        remoteUrl: author?.username
+          ? `https://x.com/${author.username}/status/${tweet.id}`
+          : `https://x.com/i/web/status/${tweet.id}`,
+        remoteCreatedAt: tweet.created_at || null,
+      };
+    });
+  }
+
+  override async replyToInboxItem(
+    accessToken: string,
+    item: { remoteId: string },
+    message: string
+  ) {
+    const client = await this.getClient(accessToken);
+    const text = this.stripLinks() ? removeLinks(message) : message;
+    const tweet = await client.v2.tweet({
+      text,
+      reply: { in_reply_to_tweet_id: item.remoteId },
+    });
+    return { remoteId: String(tweet.data.id) };
+  }
 }

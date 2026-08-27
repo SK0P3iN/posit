@@ -1019,4 +1019,66 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
       return [];
     }
   }
+
+  override inboxCapabilities() {
+    return { comments: true, mentions: false, dms: false, embeddable: true };
+  }
+
+  override async fetchInboxItems(
+    accessToken: string,
+    integration: Integration
+  ) {
+    const { client, youtube } = clientAndYoutube();
+    client.setCredentials({ access_token: accessToken });
+    const yt = youtube(client);
+
+    const { data } = await yt.commentThreads.list({
+      part: ['snippet'],
+      allThreadsRelatedToChannelId: integration.internalId,
+      maxResults: 25,
+      order: 'time',
+      textFormat: 'plainText',
+    });
+
+    return (data.items || []).map((thread) => {
+      const top = thread.snippet?.topLevelComment?.snippet;
+      const remoteId = thread.snippet?.topLevelComment?.id || thread.id || '';
+      return {
+        type: 'COMMENT' as const,
+        remoteId: String(remoteId),
+        threadKey: thread.id || remoteId,
+        authorName: top?.authorDisplayName || null,
+        authorId: top?.authorChannelId?.value || null,
+        authorPicture: top?.authorProfileImageUrl || null,
+        body: top?.textDisplay || top?.textOriginal || '',
+        replyCapable: true,
+        remoteUrl: top?.videoId
+          ? `https://www.youtube.com/watch?v=${top.videoId}&lc=${remoteId}`
+          : null,
+        remoteCreatedAt: top?.publishedAt || null,
+      };
+    });
+  }
+
+  override async replyToInboxItem(
+    accessToken: string,
+    item: { remoteId: string },
+    message: string
+  ) {
+    const { client, youtube } = clientAndYoutube();
+    client.setCredentials({ access_token: accessToken });
+    const yt = youtube(client);
+
+    const { data } = await yt.comments.insert({
+      part: ['snippet'],
+      requestBody: {
+        snippet: {
+          parentId: item.remoteId,
+          textOriginal: message,
+        },
+      },
+    });
+
+    return { remoteId: String(data.id) };
+  }
 }

@@ -21,7 +21,6 @@ import { Integration } from '@prisma/client';
 import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
 import { Tool } from '@gitroom/nestjs-libraries/integrations/tool.decorator';
 import { hasExtension } from '@gitroom/helpers/utils/has.extension';
-import { ioRedis } from '@gitroom/nestjs-libraries/redis/redis.service';
 
 // Instagram Graph API version used across every call site in this file
 // (OAuth, page discovery, container create/publish, status/permalink, music,
@@ -747,24 +746,22 @@ export class InstagramProvider
           ? `&cover_url=${encodeURIComponent(firstPost.settings.cover_url)}`
           : `&thumb_offset=${m?.thumbnailTimestamp || 0}`;
 
-        // A single video (explicit `feed`/legacy `post`) still routes
-        // through REELS - Instagram no longer meaningfully supports a
-        // standalone Feed video post (AE1).
-        const isImplicitReel =
-          hasExtension(m.path, 'mp4') && firstPost?.media?.length === 1;
+        const isVideo = hasExtension(m.path, 'mp4');
+        // Explicit Reel always gets the REELS shape. A single video under
+        // `feed`/legacy `post` still routes through REELS too - Instagram no
+        // longer meaningfully supports a standalone Feed video post (AE1).
+        const isReel =
+          requestedPostType === 'reel' ||
+          (isVideo && firstPost?.media?.length === 1);
 
         const mediaType = isStory
-          ? hasExtension(m.path, 'mp4')
+          ? isVideo
             ? `video_url=${m.path}&media_type=STORIES`
             : `image_url=${m.path}&media_type=STORIES`
-          : requestedPostType === 'reel'
-          ? // Explicit Reel: always the REELS shape, regardless of media
-            // count/extension nuances the implicit paths key off of.
-            `video_url=${m.path}&media_type=REELS${coverParams}&share_to_feed=${shareToFeed}`
-          : hasExtension(m.path, 'mp4')
-          ? isImplicitReel
-            ? `video_url=${m.path}&media_type=REELS${coverParams}&share_to_feed=${shareToFeed}`
-            : `video_url=${m.path}&media_type=VIDEO${coverParams}`
+          : isReel
+          ? `video_url=${m.path}&media_type=REELS${coverParams}&share_to_feed=${shareToFeed}`
+          : isVideo
+          ? `video_url=${m.path}&media_type=VIDEO${coverParams}`
           : `image_url=${m.path}`;
 
         const trialParams = isTrialReel
@@ -1135,13 +1132,8 @@ export class InstagramProvider
     }
 
     // Toggle is on: (re)generate the companion, unless it has already gone
-    // live - a published (or in-flight, i.e. releaseId already assigned by
-    // finalizePost) companion is left untouched rather than resent.
-    if (
-      context.existingCompanion &&
-      (context.existingCompanion.state === 'PUBLISHED' ||
-        context.existingCompanion.releaseId != null)
-    ) {
+    // live or is irreversibly in flight - resent rather than left alone.
+    if (this.isCompanionLocked(context.existingCompanion)) {
       return { action: 'none' };
     }
 
@@ -1157,41 +1149,41 @@ export class InstagramProvider
   }
 
   /**
-   * KTD7's cancellation gate. An existing companion is only safe to cancel
-   * when all three hold: not yet PUBLISHED, no releaseId, and no live
-   * Redis in-flight marker (container created, publish not yet confirmed -
-   * the same `post:inflight:{id}` key `PostsService.setPostInFlight` /
-   * `getPostInFlight` use, read directly here since this plain class isn't
-   * NestJS-DI-injected and can't inject `PostsService`).
-   *
-   * If any of those signals says "an irreversible remote step may already
-   * be under way or done", this returns `{ action: 'none' }` rather than a
-   * new bespoke cancellation heuristic. That companion is just a normal
-   * Post row flowing through the same postWorkflowV107 as any other post,
-   * so the *existing* UNCONFIRMED: reconciliation machinery
-   * (`assertCanRepublish` blocking republish, `confirm-published` letting
-   * the user resolve it) already protects it exactly the way it protects
-   * every other post the workflow can't confirm - there is nothing to
-   * build here, only something to avoid stepping on by not canceling.
+   * KTD7's lock check, shared by the upsert-regenerate gate above and the
+   * cancellation gate below: an existing companion is untouchable once any
+   * of `state === 'PUBLISHED'`, a `releaseId` is already assigned, or its
+   * `inFlight` marker is set (an irreversible remote step started, publish
+   * not yet confirmed — computed by the generic caller from PostsService's
+   * `post:inflight:{id}` Redis marker, since this plain class isn't
+   * NestJS-DI-injected and can't read that itself).
    */
-  private async deriveCompanionCancellation(
+  private isCompanionLocked(
     existingCompanion: CompanionDerivationContext['existingCompanion']
-  ): Promise<CompanionDerivationResult> {
-    if (!existingCompanion) {
-      return { action: 'none' };
-    }
-
-    if (
-      existingCompanion.state === 'PUBLISHED' ||
-      existingCompanion.releaseId != null
-    ) {
-      return { action: 'none' };
-    }
-
-    const inFlight = await ioRedis.get(
-      `post:inflight:${existingCompanion.id}`
+  ): boolean {
+    return !!(
+      existingCompanion &&
+      (existingCompanion.state === 'PUBLISHED' ||
+        existingCompanion.releaseId != null ||
+        existingCompanion.inFlight)
     );
-    if (inFlight) {
+  }
+
+  /**
+   * KTD7's cancellation gate. If `isCompanionLocked` says "an irreversible
+   * remote step may already be under way or done", this returns
+   * `{ action: 'none' }` rather than a new bespoke cancellation heuristic.
+   * That companion is just a normal Post row flowing through the same
+   * postWorkflowV107 as any other post, so the *existing* UNCONFIRMED:
+   * reconciliation machinery (`assertCanRepublish` blocking republish,
+   * `confirm-published` letting the user resolve it) already protects it
+   * exactly the way it protects every other post the workflow can't
+   * confirm - there is nothing to build here, only something to avoid
+   * stepping on by not canceling.
+   */
+  private deriveCompanionCancellation(
+    existingCompanion: CompanionDerivationContext['existingCompanion']
+  ): CompanionDerivationResult {
+    if (!existingCompanion || this.isCompanionLocked(existingCompanion)) {
       return { action: 'none' };
     }
 
@@ -1199,7 +1191,7 @@ export class InstagramProvider
   }
 
   override inboxCapabilities() {
-    return { comments: true, mentions: false, dms: false };
+    return { comments: true, mentions: false, dms: false, embeddable: true };
   }
 
   override async fetchInboxItems(
