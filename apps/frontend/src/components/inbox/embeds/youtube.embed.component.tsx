@@ -3,7 +3,7 @@
 import { FC, useEffect, useRef, useState } from 'react';
 import Script from 'next/script';
 import { InboxItem } from '@gitroom/frontend/components/inbox/use.inbox.hooks';
-import { useT } from '@gitroom/react/translation/get.transation.service.client';
+import { OpenLink } from '@gitroom/frontend/components/inbox/embeds/embed.open.link';
 
 declare global {
   interface Window {
@@ -50,7 +50,6 @@ const extractVideoId = (remoteUrl: string): string | null => {
 };
 
 export const YoutubeEmbed: FC<{ item: InboxItem }> = ({ item }) => {
-  const t = useT();
   const containerId = `youtube-embed-${item.id}`;
   const playerRef = useRef<{
     destroy: () => void;
@@ -113,14 +112,18 @@ export const YoutubeEmbed: FC<{ item: InboxItem }> = ({ item }) => {
     if (window.YT?.Player) {
       initPlayer();
     } else {
-      const previous = window.onYouTubeIframeAPIReady;
-      window.onYouTubeIframeAPIReady = () => {
-        previous?.();
-        initPlayer();
-      };
+      // Only one YoutubeEmbed is ever mounted at a time (the detail pane
+      // shows a single selected item), so this handler is replaced, not
+      // chained, per item switch — chaining would let a stale item's
+      // initPlayer() still run (against an already-unmounted container)
+      // once the API script finally loads.
+      window.onYouTubeIframeAPIReady = initPlayer;
     }
 
     return () => {
+      if (window.onYouTubeIframeAPIReady === initPlayer) {
+        window.onYouTubeIframeAPIReady = undefined;
+      }
       playerRef.current?.destroy?.();
       playerRef.current = null;
     };
@@ -128,16 +131,7 @@ export const YoutubeEmbed: FC<{ item: InboxItem }> = ({ item }) => {
   }, [item.id, videoId]);
 
   if (!videoId || failed) {
-    return item.remoteUrl ? (
-      <a
-        href={item.remoteUrl}
-        target="_blank"
-        rel="noreferrer"
-        className="text-[13px] text-btnPrimary underline"
-      >
-        {t('open_on_platform', 'Open')}
-      </a>
-    ) : null;
+    return <OpenLink remoteUrl={item.remoteUrl} />;
   }
 
   return (

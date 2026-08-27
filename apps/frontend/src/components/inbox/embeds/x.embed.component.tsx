@@ -4,7 +4,7 @@ import { FC, useRef } from 'react';
 import Script from 'next/script';
 import { InboxItem } from '@gitroom/frontend/components/inbox/use.inbox.hooks';
 import { useEmbedFallbackTimeout } from '@gitroom/frontend/components/inbox/embeds/embed.fallback.timeout.hook';
-import { useT } from '@gitroom/react/translation/get.transation.service.client';
+import { OpenLink } from '@gitroom/frontend/components/inbox/embeds/embed.open.link';
 
 declare global {
   interface Window {
@@ -17,7 +17,6 @@ declare global {
 }
 
 export const XEmbed: FC<{ item: InboxItem }> = ({ item }) => {
-  const t = useT();
   const containerRef = useRef<HTMLDivElement>(null);
 
   const status = useEmbedFallbackTimeout(item.id, containerRef, () => {
@@ -25,16 +24,7 @@ export const XEmbed: FC<{ item: InboxItem }> = ({ item }) => {
   });
 
   if (status === 'failed') {
-    return item.remoteUrl ? (
-      <a
-        href={item.remoteUrl}
-        target="_blank"
-        rel="noreferrer"
-        className="text-[13px] text-btnPrimary underline"
-      >
-        {t('open_on_platform', 'Open')}
-      </a>
-    ) : null;
+    return <OpenLink remoteUrl={item.remoteUrl} />;
   }
 
   return (

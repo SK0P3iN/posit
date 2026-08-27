@@ -4,8 +4,8 @@ import { FC, useRef } from 'react';
 import Script from 'next/script';
 import { InboxItem } from '@gitroom/frontend/components/inbox/use.inbox.hooks';
 import { useEmbedFallbackTimeout } from '@gitroom/frontend/components/inbox/embeds/embed.fallback.timeout.hook';
+import { OpenLink } from '@gitroom/frontend/components/inbox/embeds/embed.open.link';
 import { useVariables } from '@gitroom/react/helpers/variable.context';
-import { useT } from '@gitroom/react/translation/get.transation.service.client';
 
 declare global {
   interface Window {
@@ -22,23 +22,6 @@ declare global {
     fbAsyncInit?: () => void;
   }
 }
-
-const OpenLink: FC<{ remoteUrl?: string | null }> = ({ remoteUrl }) => {
-  const t = useT();
-  if (!remoteUrl) {
-    return null;
-  }
-  return (
-    <a
-      href={remoteUrl}
-      target="_blank"
-      rel="noreferrer"
-      className="text-[13px] text-btnPrimary underline"
-    >
-      {t('open_on_platform', 'Open')}
-    </a>
-  );
-};
 
 export const FacebookEmbed: FC<{ item: InboxItem }> = ({ item }) => {
   const { facebookAppId } = useVariables();
@@ -66,7 +49,7 @@ export const FacebookEmbed: FC<{ item: InboxItem }> = ({ item }) => {
         src="https://connect.facebook.net/en_US/sdk.js"
         strategy="lazyOnload"
         onLoad={() => {
-          window.fbAsyncInit = () => {
+          const initAndParse = () => {
             window.FB?.init({
               appId: facebookAppId,
               xfbml: true,
@@ -74,15 +57,11 @@ export const FacebookEmbed: FC<{ item: InboxItem }> = ({ item }) => {
             });
             window.FB?.XFBML?.parse(containerRef.current);
           };
+          window.fbAsyncInit = initAndParse;
           // If FB is already initialized by the time this script's onLoad
           // fires (e.g. re-mount after first load), parse directly too.
           if (window.FB) {
-            window.FB.init({
-              appId: facebookAppId,
-              xfbml: true,
-              version: 'v22.0',
-            });
-            window.FB.XFBML.parse(containerRef.current);
+            initAndParse();
           }
         }}
       />

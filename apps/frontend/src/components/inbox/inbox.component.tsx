@@ -15,6 +15,7 @@ import {
   useInboxSyncStatus,
 } from '@gitroom/frontend/components/inbox/use.inbox.hooks';
 import { InboxEmbedProviders } from '@gitroom/frontend/components/inbox/embeds/embed.providers';
+import { OpenLink } from '@gitroom/frontend/components/inbox/embeds/embed.open.link';
 
 export const InboxComponent = () => {
   const t = useT();
@@ -43,11 +44,17 @@ export const InboxComponent = () => {
   );
 
   const supportedChannels = useMemo(
-    () => (capabilities || []).filter((c: any) => c.supported),
+    () =>
+      (capabilities || []).filter(
+        (c: InboxChannelCapabilities) => c.supported
+      ),
     [capabilities]
   );
   const reconnectChannels = useMemo(
-    () => (capabilities || []).filter((c: any) => c.refreshNeeded),
+    () =>
+      (capabilities || []).filter(
+        (c: InboxChannelCapabilities) => c.refreshNeeded
+      ),
     [capabilities]
   );
 
@@ -148,7 +155,9 @@ export const InboxComponent = () => {
             'inbox_reconnect_banner',
             'Some channels need reconnect before inbox sync/reply works:'
           )}{' '}
-          {reconnectChannels.map((c: any) => c.name).join(', ')}
+          {reconnectChannels
+            .map((c: InboxChannelCapabilities) => c.name)
+            .join(', ')}
         </div>
       )}
 
@@ -291,16 +300,7 @@ export const InboxComponent = () => {
                 {canEmbed && EmbedComponent ? (
                   <EmbedComponent key={selected.id} item={selected} />
                 ) : (
-                  selected.remoteUrl && (
-                    <a
-                      href={selected.remoteUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-[13px] text-btnPrimary underline"
-                    >
-                      {t('open_on_platform', 'Open')}
-                    </a>
-                  )
+                  <OpenLink remoteUrl={selected.remoteUrl} />
                 )}
               </div>
               <div className="whitespace-pre-wrap text-[15px] leading-[22px] flex-1">
