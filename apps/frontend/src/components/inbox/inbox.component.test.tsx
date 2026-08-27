@@ -26,6 +26,11 @@ jest.mock('@gitroom/helpers/utils/custom.fetch', () => ({
   useFetch: () => mockFetch,
 }));
 
+const mockToasterShow = jest.fn();
+jest.mock('@gitroom/react/toaster/toaster', () => ({
+  useToaster: () => ({ show: mockToasterShow }),
+}));
+
 type ServerItem = InboxItem;
 
 const makeItem = (overrides: Partial<ServerItem> = {}): ServerItem => ({
@@ -67,6 +72,9 @@ let readGate: Promise<void> = Promise.resolve();
 let replyGate: Promise<void> = Promise.resolve();
 
 let serverItems: ServerItem[] = [];
+// Controls the /inbox/sync response body's `errors` array for U5's
+// error-path test; defaults to a clean sync.
+let syncErrors: string[] = [];
 
 const okJson = (body: unknown) => ({
   ok: true,
@@ -113,7 +121,7 @@ const installFetchMock = () => {
       return okJson({});
     }
     if (url === '/inbox/sync' && method === 'POST') {
-      return okJson({ errors: [] });
+      return okJson({ errors: syncErrors });
     }
     throw new Error(`Unhandled mock fetch: ${method} ${url}`);
   });
@@ -129,6 +137,8 @@ const renderInbox = () =>
 beforeEach(() => {
   readGate = Promise.resolve();
   replyGate = Promise.resolve();
+  syncErrors = [];
+  mockToasterShow.mockReset();
   installFetchMock();
 });
 
@@ -337,5 +347,46 @@ describe('InboxComponent unread-only eviction (U4)', () => {
     // Only the list lost the row — the open pane still shows item-1.
     screen.getByText('Author 1');
     expect(findRowByBody(container, 'Body 2')).toBeTruthy();
+  });
+});
+
+// U5 regression suite: opening the Inbox tab must trigger the same sync
+// flow as clicking "Sync now" (R7), without evicting R8's existing
+// loading/error/toast/banner handling for that flow.
+describe('InboxComponent auto-sync on open (U5)', () => {
+  const syncCalls = () =>
+    mockFetch.mock.calls.filter(([url]: [string]) => url === '/inbox/sync');
+
+  it('Covers AE6. fires a sync automatically on mount, with no user interaction', async () => {
+    serverItems = [];
+    renderInbox();
+
+    await waitFor(() => expect(syncCalls()).toHaveLength(1));
+    expect(syncCalls()[0][1]).toEqual(
+      expect.objectContaining({ method: 'POST' })
+    );
+  });
+
+  it('the manual "Sync now" button still works independently of the mount effect', async () => {
+    serverItems = [];
+    renderInbox();
+    await waitFor(() => expect(syncCalls()).toHaveLength(1));
+
+    fireEvent.click(screen.getByText('Sync now'));
+
+    await waitFor(() => expect(syncCalls()).toHaveLength(2));
+  });
+
+  it('a failed auto-triggered sync shows the same partial-error toast the manual path shows', async () => {
+    serverItems = [];
+    syncErrors = ['instagram: token expired'];
+    renderInbox();
+
+    await waitFor(() =>
+      expect(mockToasterShow).toHaveBeenCalledWith(
+        'Inbox sync finished with some channel errors',
+        'warning'
+      )
+    );
   });
 });

@@ -166,6 +166,15 @@ export const InboxComponent = () => {
     }
   }, [fetch, mutate, mutateSync, toaster, t]);
 
+  // Sync automatically whenever the Inbox tab opens, same as clicking "Sync
+  // now" (R7) — inherits that handler's existing loading/error/toast/banner
+  // handling (R8) for free. `syncNow`'s own identity changes with the
+  // filters, but this effect only needs to fire once, on mount.
+  useEffect(() => {
+    syncNow();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const sendReply = useCallback(async () => {
     if (!selectedItem?.id || !reply.trim()) {
       return;
