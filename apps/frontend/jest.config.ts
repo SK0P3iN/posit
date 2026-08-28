@@ -18,6 +18,8 @@ const config: Config = {
     '^@gitroom/helpers/(.*)$': '<rootDir>/../../libraries/helpers/src/$1',
     '^@gitroom/react/(.*)$':
       '<rootDir>/../../libraries/react-shared-libraries/src/$1',
+    '^@gitroom/nestjs-libraries/(.*)$':
+      '<rootDir>/../../libraries/nestjs-libraries/src/$1',
   },
   transform: {
     '^.+\\.tsx?$': [

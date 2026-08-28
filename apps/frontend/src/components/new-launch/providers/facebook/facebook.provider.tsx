@@ -16,6 +16,9 @@ import { useIntegration } from '@gitroom/frontend/components/launches/helpers/us
 import { FacebookPreview } from '@gitroom/frontend/components/new-launch/providers/facebook/facebook.preview';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useEffect } from 'react';
+import { Checkbox } from '@gitroom/react/form/checkbox';
+import { StorySlidePicker } from '@gitroom/frontend/components/new-launch/providers/story-slide-picker';
+import { hasExtension } from '@gitroom/helpers/utils/has.extension';
 
 const postType = [
   {
@@ -48,6 +51,28 @@ export const FacebookSettings = () => {
     }
   }, [presetAvailable, preset, setValue]);
 
+  // R5/KTD7: "Also share to Story" only applies to a post that has media
+  // and is not itself already a Story - named distinctly from `hasMedia`
+  // above (which gates the unrelated background-preset field on different
+  // "any selected post has media" semantics).
+  const media = value?.[0]?.image || [];
+  const hasStoryMedia = media.length > 0;
+  const alsoShareToStory = watch('also_share_to_story');
+  const storyMediaId = watch('story_media_id');
+  const canShareToStory = hasStoryMedia && postCurrentType !== 'story';
+
+  // Mirrors the presetAvailable auto-clear above: drop the toggle's own
+  // state if all media is removed after it was enabled.
+  useEffect(() => {
+    if (!canShareToStory && alsoShareToStory) {
+      setValue('also_share_to_story', false);
+    }
+  }, [canShareToStory, alsoShareToStory, setValue]);
+
+  const onSelectStorySlide = (id: string) => {
+    setValue('story_media_id', id, { shouldDirty: true, shouldValidate: true });
+  };
+
   return (
     <>
       <div className="pt-[20px]">
@@ -73,6 +98,33 @@ export const FacebookSettings = () => {
           label={'Embedded URL (only for text Post)'}
           {...register('url')}
         />
+      )}
+
+      {canShareToStory && (
+        <div className="mt-[8px] flex flex-col gap-[6px]">
+          <Checkbox
+            {...register('also_share_to_story', { value: false })}
+            label={t('facebook_also_share_to_story', 'Also share to Story')}
+          />
+          <div className="text-[12px] opacity-70 text-balance">
+            {t(
+              'facebook_also_share_to_story_description',
+              'This republishes the same media as a separate scheduled Story post. It creates an additional post that also counts toward your organization’s monthly post limit; if you’re at your plan’s limit, the Story companion will silently be skipped.'
+            )}
+          </div>
+          {watch('also_share_to_story') && (
+            <StorySlidePicker
+              media={media}
+              storyMediaId={storyMediaId}
+              onSelect={onSelectStorySlide}
+              // KD6/KTD8: Facebook's own Feed publish path only actually
+              // publishes the first slide when it's a video, dropping the
+              // rest of the carousel - flag that divergence here rather
+              // than let it surface only as a mismatch after publish.
+              showFeedDivergenceNotice={hasExtension(media[0]?.path, 'mp4')}
+            />
+          )}
+        </div>
       )}
 
       {presetAvailable && (
