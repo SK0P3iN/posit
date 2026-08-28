@@ -108,4 +108,16 @@ export class FacebookDto {
   @IsOptional()
   @IsString()
   text_format_preset_id?: string;
+
+  // Read by FacebookProvider.deriveCompanionPosts (U4) to decide whether a
+  // feed post should also generate a linked Story companion post.
+  @IsOptional()
+  also_share_to_story?: boolean;
+
+  // Which carousel slide (by Media.id) becomes the Story companion when the
+  // post has more than one media item. Read by deriveCompanionPosts; falls
+  // back to the first slide when unset or when the id no longer resolves.
+  @IsOptional()
+  @IsString()
+  story_media_id?: string;
 }

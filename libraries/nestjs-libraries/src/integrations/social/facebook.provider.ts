@@ -1,6 +1,8 @@
 import {
   AnalyticsData,
   AuthTokenDetails,
+  CompanionDerivationContext,
+  CompanionDerivationResult,
   PendingCheckResponse,
   PostDetails,
   PostResponse,
@@ -579,6 +581,52 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
     }
 
     return this.postNonStory(id, accessToken, postDetails);
+  }
+
+  /**
+   * Story Companion Post hook (R4), parity with InstagramProvider's
+   * implementation. Reads the Feed post's own "also share to Story" toggle
+   * from settings and decides whether the generic caller (posts.service.ts)
+   * should upsert or cancel the linked companion - this method never
+   * publishes or touches the database/Temporal itself.
+   *
+   * The companion's `settings` is `{ post_type: 'story' }`, the exact shape
+   * `postPending` already reads via `firstPost.settings.post_type ===
+   * 'story'` to route media through the existing Story publish path above.
+   *
+   * KD6: unlike Instagram, Facebook's own Feed publish path (postNonStory)
+   * may only actually publish the first slide of a carousel when it's a
+   * video - this hook does not special-case that; it always resolves the
+   * user's selected story_media_id (or falls back to the first slide) the
+   * same way Instagram does, per KTD3/SocialAbstract.resolveCompanionMedia.
+   */
+  async deriveCompanionPosts(
+    context: CompanionDerivationContext
+  ): Promise<CompanionDerivationResult> {
+    const alsoShareToStory = context.settings?.also_share_to_story === true;
+
+    if (context.operation === 'delete' || !alsoShareToStory) {
+      return this.deriveCompanionCancellation(context.existingCompanion);
+    }
+
+    // Toggle is on: (re)generate the companion, unless it has already gone
+    // live or is irreversibly in flight - resent rather than left alone.
+    if (this.isCompanionLocked(context.existingCompanion)) {
+      return { action: 'none' };
+    }
+
+    return {
+      action: 'upsert',
+      // Facebook Stories don't surface a caption the way Feed posts do, and
+      // `CompanionDerivationContext` doesn't carry the Feed post's own text
+      // (the companion republishes the same *media*, not text).
+      message: '',
+      media: this.resolveCompanionMedia(
+        context.media,
+        context.settings?.story_media_id
+      ),
+      settings: { post_type: 'story' },
+    };
   }
 
   override async checkPostStatus(
