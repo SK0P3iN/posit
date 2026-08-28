@@ -1137,57 +1137,21 @@ export class InstagramProvider
       return { action: 'none' };
     }
 
+    // Story-item selection (KTD3): which single carousel slide becomes the
+    // companion, by Media.id, falling back to the first slide when unset or
+    // when the selected slide has been removed from `context.media`.
     return {
       action: 'upsert',
       // Instagram Stories don't surface a caption the way Feed posts do,
       // and `CompanionDerivationContext` doesn't carry the Feed post's own
       // text (R7: the companion republishes the same *media*, not text).
       message: '',
-      media: context.media,
+      media: this.resolveCompanionMedia(
+        context.media,
+        context.settings?.story_media_id
+      ),
       settings: { post_type: 'story' },
     };
-  }
-
-  /**
-   * KTD7's lock check, shared by the upsert-regenerate gate above and the
-   * cancellation gate below: an existing companion is untouchable once any
-   * of `state === 'PUBLISHED'`, a `releaseId` is already assigned, or its
-   * `inFlight` marker is set (an irreversible remote step started, publish
-   * not yet confirmed — computed by the generic caller from PostsService's
-   * `post:inflight:{id}` Redis marker, since this plain class isn't
-   * NestJS-DI-injected and can't read that itself).
-   */
-  private isCompanionLocked(
-    existingCompanion: CompanionDerivationContext['existingCompanion']
-  ): boolean {
-    return !!(
-      existingCompanion &&
-      (existingCompanion.state === 'PUBLISHED' ||
-        existingCompanion.releaseId != null ||
-        existingCompanion.inFlight)
-    );
-  }
-
-  /**
-   * KTD7's cancellation gate. If `isCompanionLocked` says "an irreversible
-   * remote step may already be under way or done", this returns
-   * `{ action: 'none' }` rather than a new bespoke cancellation heuristic.
-   * That companion is just a normal Post row flowing through the same
-   * postWorkflowV107 as any other post, so the *existing* UNCONFIRMED:
-   * reconciliation machinery (`assertCanRepublish` blocking republish,
-   * `confirm-published` letting the user resolve it) already protects it
-   * exactly the way it protects every other post the workflow can't
-   * confirm - there is nothing to build here, only something to avoid
-   * stepping on by not canceling.
-   */
-  private deriveCompanionCancellation(
-    existingCompanion: CompanionDerivationContext['existingCompanion']
-  ): CompanionDerivationResult {
-    if (!existingCompanion || this.isCompanionLocked(existingCompanion)) {
-      return { action: 'none' };
-    }
-
-    return { action: 'cancel' };
   }
 
   override inboxCapabilities() {

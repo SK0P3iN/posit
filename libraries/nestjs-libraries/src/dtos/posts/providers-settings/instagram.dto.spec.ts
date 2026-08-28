@@ -95,4 +95,30 @@ describe('InstagramDto (U5 - post_type restructure, share_to_feed, cover_url)', 
       expect(errors.filter((e) => e.property === 'also_share_to_story')).toHaveLength(0);
     });
   });
+
+  describe('story_media_id', () => {
+    it('is valid when absent', async () => {
+      const dto = plainToInstance(InstagramDto, basePayload);
+      const errors = await validate(dto);
+      expect(errors.filter((e) => e.property === 'story_media_id')).toHaveLength(0);
+    });
+
+    it('is valid when a string', async () => {
+      const dto = plainToInstance(InstagramDto, {
+        ...basePayload,
+        story_media_id: 'media-123',
+      });
+      const errors = await validate(dto);
+      expect(errors.filter((e) => e.property === 'story_media_id')).toHaveLength(0);
+    });
+
+    it('rejects a non-string value', async () => {
+      const dto = plainToInstance(InstagramDto, {
+        ...basePayload,
+        story_media_id: 12345,
+      });
+      const errors = await validate(dto);
+      expect(errors.some((e) => e.property === 'story_media_id')).toBe(true);
+    });
+  });
 });

@@ -91,4 +91,11 @@ export class InstagramDto {
   // Feed/Reel post should also generate a linked Story companion post.
   @IsOptional()
   also_share_to_story?: boolean;
+
+  // Which carousel slide (by Media.id) becomes the Story companion when the
+  // post has more than one media item. Read by deriveCompanionPosts; falls
+  // back to the first slide when unset or when the id no longer resolves.
+  @IsOptional()
+  @IsString()
+  story_media_id?: string;
 }

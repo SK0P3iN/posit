@@ -1,6 +1,8 @@
 import { timer } from '@gitroom/helpers/utils/timer';
 import { Integration } from '@prisma/client';
 import {
+  CompanionDerivationContext,
+  CompanionDerivationResult,
   FetchedInboxItem,
   InboxCapabilities,
   InboxReplyTarget,
@@ -508,5 +510,65 @@ export abstract class SocialAbstract {
     }
 
     return true;
+  }
+
+  /**
+   * Story Companion Post lock check (KTD2), shared by every provider that
+   * implements `deriveCompanionPosts`. An existing companion is untouchable
+   * once any of `state === 'PUBLISHED'`, a `releaseId` is already assigned,
+   * or its `inFlight` marker is set (an irreversible remote step started,
+   * publish not yet confirmed - computed by the generic caller from
+   * PostsService's `post:inflight:{id}` Redis marker, since this plain
+   * class isn't NestJS-DI-injected and can't read that itself). This is
+   * provider-agnostic Post-state logic with no per-provider branching.
+   */
+  protected isCompanionLocked(
+    existingCompanion: CompanionDerivationContext['existingCompanion']
+  ): boolean {
+    return !!(
+      existingCompanion &&
+      (existingCompanion.state === 'PUBLISHED' ||
+        existingCompanion.releaseId != null ||
+        existingCompanion.inFlight)
+    );
+  }
+
+  /**
+   * Story Companion Post cancellation gate (KTD2). If `isCompanionLocked`
+   * says "an irreversible remote step may already be under way or done",
+   * this returns `{ action: 'none' }` rather than a new bespoke
+   * cancellation heuristic. That companion is just a normal Post row
+   * flowing through the same post workflow as any other post, so the
+   * *existing* UNCONFIRMED: reconciliation machinery already protects it
+   * exactly the way it protects every other post the workflow can't
+   * confirm - there is nothing to build here, only something to avoid
+   * stepping on by not canceling.
+   */
+  protected deriveCompanionCancellation(
+    existingCompanion: CompanionDerivationContext['existingCompanion']
+  ): CompanionDerivationResult {
+    if (!existingCompanion || this.isCompanionLocked(existingCompanion)) {
+      return { action: 'none' };
+    }
+
+    return { action: 'cancel' };
+  }
+
+  /**
+   * Story Companion Post media selection (KTD3). Resolves which single
+   * media item becomes the companion Story: the entry matching
+   * `story_media_id`, falling back to the first item when unset, or when
+   * the id no longer resolves (the selected slide was removed). Wraps in
+   * an array only when a match exists, so an empty-media post keeps
+   * today's `media: []` behavior instead of an `undefined` entry that
+   * would crash a provider's story publish loop.
+   */
+  protected resolveCompanionMedia(
+    media: CompanionDerivationContext['media'],
+    storyMediaId: string | undefined
+  ): CompanionDerivationContext['media'] {
+    const selected =
+      media.find((item) => item.id === storyMediaId) ?? media[0];
+    return selected ? [selected] : [];
   }
 }

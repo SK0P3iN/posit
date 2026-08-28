@@ -163,6 +163,7 @@ export type MediaContent = {
   alt?: string;
   thumbnail?: string;
   thumbnailTimestamp?: number;
+  id?: string; // Media.id, when the entry originates from the media library (used by deriveCompanionPosts's story_media_id lookup)
 };
 
 export type FetchPageInformationResult = {

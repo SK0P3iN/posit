@@ -717,6 +717,64 @@ describe('InstagramProvider - Graph API version (R13/U1)', () => {
       );
       expect(result).toEqual({ action: 'none' });
     });
+
+    describe('carousel story slide selection (KTD3)', () => {
+      const carouselMedia = [
+        { type: 'image', path: 'https://cdn/img1.png', id: 'media-1' },
+        { type: 'image', path: 'https://cdn/img2.png', id: 'media-2' },
+        { type: 'image', path: 'https://cdn/img3.png', id: 'media-3' },
+      ] as any;
+
+      it('story_media_id set to a present slide -> uses only that slide', async () => {
+        const result = await provider.deriveCompanionPosts(
+          buildContext({
+            media: carouselMedia,
+            settings: { also_share_to_story: true, story_media_id: 'media-2' },
+          })
+        );
+        expect(result.action).toBe('upsert');
+        expect((result as any).media).toEqual([carouselMedia[1]]);
+      });
+
+      it('(AE2/KD5) story_media_id set to a slide no longer present -> falls back silently to the first slide', async () => {
+        const result = await provider.deriveCompanionPosts(
+          buildContext({
+            media: carouselMedia,
+            settings: {
+              also_share_to_story: true,
+              story_media_id: 'media-removed',
+            },
+          })
+        );
+        expect(result.action).toBe('upsert');
+        expect((result as any).media).toEqual([carouselMedia[0]]);
+      });
+
+      it('(R2/KD2) no story_media_id set -> defaults to the first slide', async () => {
+        const result = await provider.deriveCompanionPosts(
+          buildContext({
+            media: carouselMedia,
+            settings: { also_share_to_story: true },
+          })
+        );
+        expect(result.action).toBe('upsert');
+        expect((result as any).media).toEqual([carouselMedia[0]]);
+      });
+
+      it('media is empty -> resolves to an empty media array, not [undefined]', async () => {
+        const result = await provider.deriveCompanionPosts(
+          buildContext({
+            media: [],
+            settings: {
+              also_share_to_story: true,
+              story_media_id: 'media-1',
+            },
+          })
+        );
+        expect(result.action).toBe('upsert');
+        expect((result as any).media).toEqual([]);
+      });
+    });
   });
 
   describe('handleErrors - unchanged by the version bump', () => {
