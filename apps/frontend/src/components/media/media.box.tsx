@@ -20,6 +20,7 @@ import { VideoFrame } from '@gitroom/react/helpers/video.frame';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useToaster } from '@gitroom/react/toaster/toaster';
+import { deleteDialog } from '@gitroom/react/helpers/delete.dialog';
 import { useModals } from '@gitroom/frontend/components/layout/new-modal';
 import { DropFiles } from '@gitroom/frontend/components/layout/drop.files';
 import { ThirdPartyMediaLibrary } from '@gitroom/frontend/components/third-parties/third-party.media-library';
@@ -368,6 +369,22 @@ export const MediaBox: FC<{
 
   const deleteWithWarning = useCallback(
     async (ids: string[], afterDelete?: () => Promise<void>) => {
+      if (
+        !(await deleteDialog(
+          ids.length > 1
+            ? t(
+                'delete_media_bulk_confirm',
+                'Are you sure you want to delete these {{count}} items?',
+                { count: ids.length }
+              )
+            : t(
+                'delete_media_confirm',
+                'Are you sure you want to delete this item?'
+              )
+        ))
+      ) {
+        return;
+      }
       const response = await fetch('/media/bulk', {
         method: 'POST',
         body: JSON.stringify({ ids }),
@@ -394,6 +411,16 @@ export const MediaBox: FC<{
 
   const deleteFolderWithWarning = useCallback(
     async (folderId: string) => {
+      if (
+        !(await deleteDialog(
+          t(
+            'delete_folder_confirm',
+            'Are you sure you want to delete this folder?'
+          )
+        ))
+      ) {
+        return;
+      }
       const response = await fetch(`/media/folders/${folderId}`, {
         method: 'DELETE',
       });
@@ -433,7 +460,6 @@ export const MediaBox: FC<{
     }) => {
       modals.openModal({
         title: options.title,
-        askClose: true,
         children: (close) => (
           <FolderNameModal
             title={options.title}
