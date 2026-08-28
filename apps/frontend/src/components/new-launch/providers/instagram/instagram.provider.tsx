@@ -21,6 +21,7 @@ import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { InstagramPreview } from '@gitroom/frontend/components/new-launch/providers/instagram/instagram.preview';
 import { MediaComponent } from '@gitroom/frontend/components/media/media.component';
 import { hasExtension } from '@gitroom/helpers/utils/has.extension';
+import { StorySlidePicker } from '@gitroom/frontend/components/new-launch/providers/story-slide-picker';
 
 // Same warning glyph tiktok.provider.tsx uses for its inline restriction
 // notice - reused here so both providers' "heads up before you schedule"
@@ -118,6 +119,19 @@ const InstagramSettings: FC = () => {
   const onChangeCover = useCallback(
     (event: { target: { value?: { id: string; path: string } } }) => {
       setValue('cover_url', event.target.value?.path, {
+        shouldDirty: true,
+        shouldValidate: true,
+      });
+    },
+    [setValue]
+  );
+
+  // KD2/KD8: defaults to the first slide when unset; a prior explicit pick
+  // is never cleared on toggle-off, so it survives re-enabling the toggle.
+  const storyMediaId = watch('story_media_id');
+  const onSelectStorySlide = useCallback(
+    (id: string) => {
+      setValue('story_media_id', id, {
         shouldDirty: true,
         shouldValidate: true,
       });
@@ -244,7 +258,9 @@ const InstagramSettings: FC = () => {
         </div>
       )}
 
-      {effectivePostType === 'feed' && (
+      {/* KTD6/R1: same block for Feed and Reel - Reels are always a single
+          video (never a carousel), so the picker below simply no-ops there. */}
+      {(effectivePostType === 'feed' || effectivePostType === 'reel') && (
         <div className="mt-[8px] flex flex-col gap-[6px]">
           <Checkbox
             {...register('also_share_to_story', {
@@ -261,6 +277,13 @@ const InstagramSettings: FC = () => {
               'This republishes the same media as a separate scheduled Story post - it is NOT Instagram’s native "share to Story" reshare sticker, which the API cannot produce. It creates an additional post that also counts toward your organization’s monthly post limit; if you’re at your plan’s limit, the Story companion will silently be skipped.'
             )}
           </div>
+          {watch('also_share_to_story') && (
+            <StorySlidePicker
+              media={media}
+              storyMediaId={storyMediaId}
+              onSelect={onSelectStorySlide}
+            />
+          )}
         </div>
       )}
 
