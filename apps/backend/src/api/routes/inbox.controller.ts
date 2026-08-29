@@ -14,6 +14,7 @@ import { Organization } from '@prisma/client';
 import { InboxService } from '@gitroom/nestjs-libraries/database/prisma/inbox/inbox.service';
 import { GetInboxDto } from '@gitroom/nestjs-libraries/dtos/inbox/get.inbox.dto';
 import { ReplyInboxDto } from '@gitroom/nestjs-libraries/dtos/inbox/reply.inbox.dto';
+import { LikeInboxCommentDto } from '@gitroom/nestjs-libraries/dtos/inbox/like.inbox.comment.dto';
 
 @ApiTags('Inbox')
 @Controller('/inbox')
@@ -60,6 +61,45 @@ export class InboxController {
     @Body() body: ReplyInboxDto
   ) {
     return this._inboxService.reply(org.id, id, body.message);
+  }
+
+  @Get('/thread/:integrationId/:postRemoteId')
+  getThread(
+    @GetOrgFromRequest() org: Organization,
+    @Param('integrationId') integrationId: string,
+    @Param('postRemoteId') postRemoteId: string
+  ) {
+    return this._inboxService.getThread(org.id, integrationId, postRemoteId);
+  }
+
+  @Post('/comment/:integrationId/:commentRemoteId/like')
+  likeComment(
+    @GetOrgFromRequest() org: Organization,
+    @Param('integrationId') integrationId: string,
+    @Param('commentRemoteId') commentRemoteId: string,
+    @Body() body: LikeInboxCommentDto
+  ) {
+    return this._inboxService.likeComment(
+      org.id,
+      integrationId,
+      commentRemoteId,
+      body.liked
+    );
+  }
+
+  @Post('/comment/:integrationId/:commentRemoteId/reply')
+  replyToComment(
+    @GetOrgFromRequest() org: Organization,
+    @Param('integrationId') integrationId: string,
+    @Param('commentRemoteId') commentRemoteId: string,
+    @Body() body: ReplyInboxDto
+  ) {
+    return this._inboxService.replyToComment(
+      org.id,
+      integrationId,
+      commentRemoteId,
+      body.message
+    );
   }
 
   @Delete('/:id')
