@@ -49,6 +49,13 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
   }
   dto = FacebookDto;
 
+  // Graph API rejects photos over 4MB with error code 1366046 (see
+  // handleErrors below) — this makes that check proactive instead of
+  // discovering it only after the post attempt.
+  override mediaLimits = {
+    image: { maxSizeBytes: 4 * 1024 * 1024 },
+  };
+
   override async checkValidity(
     [firstPost]: Array<ValidityMedia[]>,
     settings: any

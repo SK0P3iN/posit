@@ -146,4 +146,38 @@ describe('FacebookProvider', () => {
       expect(result).toEqual({ action: 'none' });
     });
   });
+
+  describe('FacebookProvider - proactive 4MB photo limit (turns Graph API error 1366046 proactive)', () => {
+    it('flags a photo over 4MB before it ever reaches the Graph API', async () => {
+      jest.spyOn(provider as any, 'mediaSize').mockResolvedValue(5 * 1024 * 1024);
+
+      const result = await provider.checkMediaLimits([
+        [{ path: 'https://cdn/img.png' }],
+      ]);
+      expect(result).toBe(
+        'Photo exceeds the facebook limit of 4.0MB (currently 5.0MB)'
+      );
+    });
+
+    it('allows a photo within the 4MB limit', async () => {
+      jest.spyOn(provider as any, 'mediaSize').mockResolvedValue(1 * 1024 * 1024);
+
+      const result = await provider.checkMediaLimits([
+        [{ path: 'https://cdn/img.png' }],
+      ]);
+      expect(result).toBe(true);
+    });
+
+    it('does not apply the photo limit to a video', async () => {
+      const mediaSizeSpy = jest
+        .spyOn(provider as any, 'mediaSize')
+        .mockResolvedValue(50 * 1024 * 1024);
+
+      const result = await provider.checkMediaLimits([
+        [{ path: 'https://cdn/clip.mp4' }],
+      ]);
+      expect(result).toBe(true);
+      expect(mediaSizeSpy).not.toHaveBeenCalled();
+    });
+  });
 });
