@@ -31,6 +31,15 @@ jest.mock('@gitroom/react/toaster/toaster', () => ({
   useToaster: () => ({ show: mockToasterShow }),
 }));
 
+jest.mock('@gitroom/frontend/components/layout/new-modal', () => ({
+  useModals: () => ({
+    openModal: jest.fn(),
+    closeAll: jest.fn(),
+    closeById: jest.fn(),
+    closeCurrent: jest.fn(),
+  }),
+}));
+
 type ServerItem = InboxItem;
 
 const makeItem = (overrides: Partial<ServerItem> = {}): ServerItem => ({

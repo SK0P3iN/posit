@@ -6,6 +6,7 @@ import dayjs from 'dayjs';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useToaster } from '@gitroom/react/toaster/toaster';
+import { useModals } from '@gitroom/frontend/components/layout/new-modal';
 import { Button } from '@gitroom/react/form/button';
 import {
   InboxChannelCapabilities,
@@ -16,11 +17,13 @@ import {
 } from '@gitroom/frontend/components/inbox/use.inbox.hooks';
 import { InboxEmbedProviders } from '@gitroom/frontend/components/inbox/embeds/embed.providers';
 import { OpenLink } from '@gitroom/frontend/components/inbox/embeds/embed.open.link';
+import { PostThreadModal } from '@gitroom/frontend/components/inbox/thread/post-thread.modal';
 
 export const InboxComponent = () => {
   const t = useT();
   const fetch = useFetch();
   const toaster = useToaster();
+  const modal = useModals();
   const [page, setPage] = useState(0);
   const [type, setType] = useState<string>('');
   const [unreadOnly, setUnreadOnly] = useState(false);
@@ -391,6 +394,27 @@ export const InboxComponent = () => {
                   <OpenLink remoteUrl={selectedItem.remoteUrl} />
                 )}
               </div>
+              {selectedCapability?.comments && selectedItem.threadKey && (
+                <Button
+                  onClick={() =>
+                    modal.openModal({
+                      title: t('inbox_view_thread', 'View full thread'),
+                      closeOnClickOutside: true,
+                      closeOnEscape: true,
+                      withCloseButton: true,
+                      classNames: { modal: 'w-[100%] max-w-[720px]' },
+                      children: (
+                        <PostThreadModal
+                          integrationId={selectedItem.integration.id}
+                          postRemoteId={selectedItem.threadKey as string}
+                        />
+                      ),
+                    })
+                  }
+                >
+                  {t('inbox_view_thread', 'View full thread')}
+                </Button>
+              )}
               <div className="whitespace-pre-wrap text-[15px] leading-[22px] flex-1">
                 {selectedItem.body}
               </div>
