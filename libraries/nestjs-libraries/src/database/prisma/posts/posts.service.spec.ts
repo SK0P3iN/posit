@@ -584,4 +584,43 @@ describe('PostsService - anonymous review comments', () => {
       'info'
     );
   });
+
+  it('still creates a public comment when the notification service rejects', async () => {
+    const { service, postRepository } = makePostsService({
+      postRepository: {
+        getPost: jest.fn().mockResolvedValue({ id: 'post-1', organizationId: 'org-1' }),
+        countAnonymousComments: jest.fn().mockResolvedValue(0),
+      },
+      notificationService: {
+        inAppNotification: jest.fn().mockRejectedValue(new Error('temporal down')),
+      },
+    });
+
+    const result = await service.createPublicComment(
+      'post-1',
+      'Jane Reviewer',
+      'Looks great!'
+    );
+
+    expect(postRepository.createPublicComment).toHaveBeenCalled();
+    expect(result).toEqual({
+      id: 'comment-1',
+      authorName: 'Jane Reviewer',
+      content: 'Looks great!',
+    });
+  });
+
+  it('still creates an authenticated comment when the notification service rejects', async () => {
+    const { service, postRepository } = makePostsService({
+      notificationService: {
+        inAppNotification: jest.fn().mockRejectedValue(new Error('temporal down')),
+      },
+    });
+
+    await expect(
+      service.createComment('org-1', 'user-1', 'post-1', 'Looks great!')
+    ).resolves.toBeDefined();
+
+    expect(postRepository.createComment).toHaveBeenCalled();
+  });
 });

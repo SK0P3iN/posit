@@ -129,14 +129,27 @@ const AnonymousCommentForm: FC<{
 }> = ({ postId, onPosted, atLimit }) => {
   const fetch = useFetch();
   const t = useT();
+  const [error, setError] = useState('');
   const { handleSubmit, register, setValue } = useForm();
   const submit: SubmitHandler<FieldValues> = useCallback(
     async (e) => {
-      setValue('content', '');
-      await fetch(`/public/posts/${postId}/comments`, {
+      setError('');
+      const response = await fetch(`/public/posts/${postId}/comments`, {
         method: 'POST',
         body: JSON.stringify(e),
       });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        setError(
+          body?.message ||
+            t(
+              'comment_submission_failed',
+              'Could not post your comment. Please try again.'
+            )
+        );
+        return;
+      }
+      setValue('content', '');
       onPosted();
     },
     [postId, onPosted]
@@ -155,6 +168,7 @@ const AnonymousCommentForm: FC<{
 
   return (
     <form className="flex-1 space-y-2" onSubmit={handleSubmit(submit)}>
+      {!!error && <p className="text-sm text-red-400">{error}</p>}
       <input
         {...register('name', {
           required: true,

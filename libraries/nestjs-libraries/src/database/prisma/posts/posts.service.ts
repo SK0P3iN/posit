@@ -1528,13 +1528,15 @@ export class PostsService {
   }
 
   private async notifyNewComment(orgId: string, postId: string) {
-    await this._notificationService.inAppNotification(
-      orgId,
-      'New comment on your post',
-      `Someone left a new comment on one of your posts. Check it out: ${process.env.FRONTEND_URL}/p/${postId}`,
-      true,
-      false,
-      'info'
-    );
+    try {
+      await this._notificationService.inAppNotification(
+        orgId,
+        'New comment on your post',
+        `Someone left a new comment on one of your posts. Check it out: ${process.env.FRONTEND_URL}/p/${postId}`,
+        true,
+        false,
+        'info'
+      );
+    } catch (err) {}
   }
 }
