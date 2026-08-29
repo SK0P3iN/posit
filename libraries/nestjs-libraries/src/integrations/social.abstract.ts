@@ -7,7 +7,9 @@ import {
   InboxCapabilities,
   InboxReplyTarget,
   PendingCheckResponse,
+  MediaLimit,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
+import { hasExtension } from '@gitroom/helpers/utils/has.extension';
 import { ApplicationFailure } from '@temporalio/activity';
 import { readOrFetch } from '@gitroom/helpers/utils/read.or.fetch';
 import { getSsrfSafeDispatcher } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
@@ -119,6 +121,51 @@ export abstract class SocialAbstract {
     settings: any,
     additionalSettings: any[]
   ): Promise<string | true> {
+    return true;
+  }
+
+  mediaLimits?: {
+    image?: MediaLimit;
+    video?: MediaLimit;
+  };
+
+  /**
+   * Generic proactive size check, driven entirely by the `mediaLimits` data a
+   * provider declares (e.g. `mediaLimits = { image: { maxSizeBytes: 4 * 1024 * 1024 } }`
+   * in facebook.provider.ts) — no provider-specific logic lives here. Fails
+   * open (returns true) if the size can't be determined, so a transient
+   * network error never blocks an otherwise-valid post.
+   */
+  async checkMediaLimits(posts: Array<ValidityMedia[]>): Promise<string | true> {
+    if (!this.mediaLimits) {
+      return true;
+    }
+
+    for (const mediaItems of posts) {
+      for (const media of mediaItems) {
+        const isVideo = hasExtension(media.path, 'mp4');
+        const limit = isVideo ? this.mediaLimits.video : this.mediaLimits.image;
+        if (!limit) {
+          continue;
+        }
+
+        let size: number;
+        try {
+          size = await this.mediaSize(media.path, this.identifier);
+        } catch {
+          continue;
+        }
+
+        if (size > limit.maxSizeBytes) {
+          const maxMb = (limit.maxSizeBytes / (1024 * 1024)).toFixed(1);
+          const actualMb = (size / (1024 * 1024)).toFixed(1);
+          return `${isVideo ? 'Video' : 'Photo'} exceeds the ${
+            this.identifier
+          } limit of ${maxMb}MB (currently ${actualMb}MB)`;
+        }
+      }
+    }
+
     return true;
   }
 

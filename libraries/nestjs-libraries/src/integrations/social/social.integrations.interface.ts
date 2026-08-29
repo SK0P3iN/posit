@@ -184,10 +184,17 @@ export interface SocialProvider
   refreshCron?: boolean;
   dto?: any;
   maxLength: (additionalSettings?: any) => number;
+  mediaLimits?: {
+    image?: MediaLimit;
+    video?: MediaLimit;
+  };
   checkValidity(
     posts: Array<{ path: string; thumbnail?: string }[]>,
     settings: any,
     additionalSettings: any[]
+  ): Promise<string | true>;
+  checkMediaLimits(
+    posts: Array<{ path: string; thumbnail?: string }[]>
   ): Promise<string | true>;
   checkPostStatus(
     accessToken: string,
@@ -331,3 +338,5 @@ export type InboxReplyTarget = {
   threadKey?: string | null;
   authorId?: string | null;
 };
+
+export type MediaLimit = { maxSizeBytes: number };
