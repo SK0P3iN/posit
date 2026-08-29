@@ -1039,6 +1039,31 @@ export class PostsRepository {
     });
   }
 
+  countAnonymousComments(postId: string) {
+    return this._comments.model.comments.count({
+      where: {
+        postId,
+        userId: null,
+      },
+    });
+  }
+
+  createPublicComment(
+    orgId: string,
+    postId: string,
+    name: string,
+    content: string
+  ) {
+    return this._comments.model.comments.create({
+      data: {
+        organizationId: orgId,
+        postId,
+        authorName: name,
+        content,
+      },
+    });
+  }
+
   async getPostByForWebhookId(postId: string) {
     return this._post.model.post.findMany({
       where: {

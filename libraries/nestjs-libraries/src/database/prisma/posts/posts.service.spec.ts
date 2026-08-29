@@ -368,3 +368,73 @@ describe('PostsRepository - Story Companion Post persistence (U3, KTD2/KTD3)', (
     expect(where).not.toHaveProperty('storyCompanionOfPostId');
   });
 });
+
+describe('PostsRepository - anonymous review comments', () => {
+  function makeFakeCommentsDelegate() {
+    const rows: any[] = [];
+    return {
+      rows,
+      count: jest.fn(async ({ where }: any) => {
+        return rows.filter(
+          (r) => r.postId === where.postId && r.userId === null
+        ).length;
+      }),
+      create: jest.fn(async ({ data }: any) => {
+        const row = { id: `comment-${rows.length + 1}`, ...data };
+        rows.push(row);
+        return row;
+      }),
+    };
+  }
+
+  function makeRepository() {
+    const commentsDelegate = makeFakeCommentsDelegate();
+    const repository = new PostsRepository(
+      {} as any,
+      {} as any,
+      { model: { comments: commentsDelegate } } as any,
+      {} as any,
+      {} as any,
+      {} as any
+    );
+    return { repository, commentsDelegate };
+  }
+
+  it('countAnonymousComments counts only comments with a null userId on that post', async () => {
+    const { repository, commentsDelegate } = makeRepository();
+    commentsDelegate.rows.push(
+      { postId: 'post-1', userId: null },
+      { postId: 'post-1', userId: null },
+      { postId: 'post-1', userId: 'user-1' },
+      { postId: 'post-2', userId: null }
+    );
+
+    const count = await repository.countAnonymousComments('post-1');
+
+    expect(count).toBe(2);
+    expect(commentsDelegate.count).toHaveBeenCalledWith({
+      where: { postId: 'post-1', userId: null },
+    });
+  });
+
+  it('createPublicComment inserts a comment with no userId and the given authorName', async () => {
+    const { repository, commentsDelegate } = makeRepository();
+
+    const result = await repository.createPublicComment(
+      'org-1',
+      'post-1',
+      'Jane Reviewer',
+      'Looks great!'
+    );
+
+    expect(commentsDelegate.create).toHaveBeenCalledWith({
+      data: {
+        organizationId: 'org-1',
+        postId: 'post-1',
+        authorName: 'Jane Reviewer',
+        content: 'Looks great!',
+      },
+    });
+    expect(result.authorName).toBe('Jane Reviewer');
+  });
+});
