@@ -22,6 +22,7 @@ import { InternalChannels } from '@gitroom/frontend/components/launches/internal
 import { createPortal } from 'react-dom';
 import clsx from 'clsx';
 import SafeImage from '@gitroom/react/helpers/safe.image';
+import { hasExtension } from '@gitroom/helpers/utils/has.extension';
 
 class Empty {
   @IsOptional()
@@ -37,6 +38,40 @@ interface CharacterCondition {
   maximumCharacters: number;
 }
 
+export const getOversizedMedia = (
+  entries: Array<{ media?: Array<{ path: string; fileSize?: number }> }>,
+  limits?: {
+    image?: { maxSizeBytes: number };
+    video?: { maxSizeBytes: number };
+  }
+): string[] => {
+  if (!limits) {
+    return [];
+  }
+
+  const messages: string[] = [];
+  for (const entry of entries) {
+    for (const media of entry.media || []) {
+      if (!media.fileSize) {
+        continue;
+      }
+
+      const isVideo = hasExtension(media.path, 'mp4');
+      const limit = isVideo ? limits.video : limits.image;
+      if (!limit || media.fileSize <= limit.maxSizeBytes) {
+        continue;
+      }
+
+      const maxMb = (limit.maxSizeBytes / (1024 * 1024)).toFixed(1);
+      const actualMb = (media.fileSize / (1024 * 1024)).toFixed(1);
+      messages.push(
+        `${isVideo ? 'Video' : 'Photo'} is ${actualMb}MB, over the ${maxMb}MB limit for this channel`
+      );
+    }
+  }
+  return messages;
+};
+
 export const withProvider = function <T extends object>(params: {
   comments?: boolean | 'no-media';
   postComment: PostComment;
@@ -49,6 +84,10 @@ export const withProvider = function <T extends object>(params: {
   }>;
   dto?: any;
   maximumCharacters?: number | ((settings: any) => number);
+  mediaLimits?: {
+    image?: { maxSizeBytes: number };
+    video?: { maxSizeBytes: number };
+  };
 }) {
   const {
     postComment,
@@ -56,6 +95,7 @@ export const withProvider = function <T extends object>(params: {
     CustomPreviewComponent,
     dto,
     maximumCharacters,
+    mediaLimits,
   } = params;
 
   const Wrapped = forwardRef((props: { id: string }, ref) => {
@@ -168,6 +208,11 @@ export const withProvider = function <T extends object>(params: {
       return global;
     }, [internal, global, isGlobal]);
 
+    const oversizedMedia = useMemo(
+      () => getOversizedMedia(value, mediaLimits),
+      [value]
+    );
+
     const form = useForm({
       resolver: classValidatorResolver(dto || Empty),
       ...(Object.keys(selectedIntegration.settings).length > 0
@@ -244,6 +289,15 @@ export const withProvider = function <T extends object>(params: {
               !current && 'hidden'
             )}
           >
+            {current &&
+              oversizedMedia.map((message, index) => (
+                <div
+                  key={index}
+                  className="bg-red-500/10 border border-red-500 text-red-500 p-[10px] mb-[18px] rounded-[10px] text-[13px] text-balance"
+                >
+                  {message}
+                </div>
+              ))}
             {current &&
               (tab === 0 ||
                 (!SettingsComponent && !data?.internalPlugs?.length)) &&

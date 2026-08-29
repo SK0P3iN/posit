@@ -173,4 +173,7 @@ export default withProvider<FacebookDto>({
   CustomPreviewComponent: FacebookPreview,
   dto: FacebookDto,
   maximumCharacters: 63206,
+  mediaLimits: {
+    image: { maxSizeBytes: 4 * 1024 * 1024 },
+  },
 });
