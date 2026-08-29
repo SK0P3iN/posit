@@ -364,14 +364,16 @@ export class MediaService {
     fileName: string,
     filePath: string,
     originalName?: string,
-    folderId?: string | null
+    folderId?: string | null,
+    fileSize?: number
   ) {
     return this._mediaRepository.saveFile(
       org,
       fileName,
       filePath,
       originalName,
-      folderId
+      folderId,
+      fileSize
     );
   }
 

@@ -16,7 +16,8 @@ export class MediaRepository {
     fileName: string,
     filePath: string,
     originalName?: string,
-    folderId?: string | null
+    folderId?: string | null,
+    fileSize?: number
   ) {
     return this._media.model.media.create({
       data: {
@@ -28,6 +29,7 @@ export class MediaRepository {
         name: fileName,
         path: filePath,
         originalName: originalName || null,
+        fileSize: fileSize || 0,
         ...(folderId
           ? {
               folder: {
@@ -46,6 +48,7 @@ export class MediaRepository {
         thumbnail: true,
         alt: true,
         folderId: true,
+        fileSize: true,
       },
     });
   }
@@ -575,6 +578,7 @@ export class MediaRepository {
         alt: true,
         thumbnailTimestamp: true,
         folderId: true,
+        fileSize: true,
       },
       skip: pageNum * 18,
       take: 18,

@@ -200,7 +200,8 @@ export class MediaController {
       uploadedFile.originalname,
       uploadedFile.path,
       originalName,
-      folderId || undefined
+      folderId || undefined,
+      file.size
     );
   }
 
@@ -254,7 +255,8 @@ export class MediaController {
       getFile.originalname,
       getFile.path,
       originalName,
-      folderId || undefined
+      folderId || undefined,
+      file.size
     );
   }
 
