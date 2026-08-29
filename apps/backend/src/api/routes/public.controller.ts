@@ -19,6 +19,7 @@ import { Request, Response } from 'express';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import { getCookieUrlFromDomain } from '@gitroom/helpers/subdomain/subdomain.management';
 import { AgentGraphInsertService } from '@gitroom/nestjs-libraries/agent/agent.graph.insert.service';
+import { CreatePublicCommentDto } from '@gitroom/nestjs-libraries/dtos/posts/create.public.comment.dto';
 import { SubscriptionService } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.service';
 import { AuthService } from '@gitroom/helpers/auth/auth.service';
 import { pricing } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/pricing';
@@ -74,6 +75,18 @@ export class PublicController {
   @Get(`/posts/:id/comments`)
   async getComments(@Param('id') postId: string) {
     return { comments: await this._postsService.getComments(postId) };
+  }
+
+  @Post(`/posts/:id/comments`)
+  async createPublicComment(
+    @Param('id') postId: string,
+    @Body() body: CreatePublicCommentDto
+  ) {
+    return this._postsService.createPublicComment(
+      postId,
+      body.name,
+      body.content
+    );
   }
 
   @Post('/t')
