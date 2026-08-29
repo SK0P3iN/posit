@@ -1069,7 +1069,8 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
   override async likeInboxComment(
     accessToken: string,
     commentRemoteId: string,
-    liked: boolean
+    liked: boolean,
+    _integration: Integration
   ): Promise<{ liked: boolean; likeCount: number }> {
     await this.fetch(
       `https://graph.facebook.com/v20.0/${commentRemoteId}/likes?access_token=${accessToken}`,
