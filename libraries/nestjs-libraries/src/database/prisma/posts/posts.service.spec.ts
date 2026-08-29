@@ -624,3 +624,74 @@ describe('PostsService - anonymous review comments', () => {
     expect(postRepository.createComment).toHaveBeenCalled();
   });
 });
+
+describe('PostsService - media size limits (checkMediaLimits)', () => {
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('surfaces a checkMediaLimits failure as the post error when checkValidity passes', async () => {
+    const provider = {
+      checkValidity: jest.fn().mockResolvedValue(true),
+      checkMediaLimits: jest
+        .fn()
+        .mockResolvedValue('Photo exceeds the facebook limit of 4.0MB (currently 5.0MB)'),
+      maxLength: () => 1000,
+    };
+    const { service } = makePostsService({ provider });
+
+    const [result] = await service.validatePosts('org-1', [
+      {
+        integration: { id: 'integration-1' },
+        settings: {},
+        value: [{ content: 'hello', image: [{ path: 'https://cdn/img.png' }] }],
+      },
+    ]);
+
+    expect(provider.checkMediaLimits).toHaveBeenCalledWith([
+      [{ path: 'https://cdn/img.png' }],
+    ]);
+    expect(result.errors).toBe(
+      'Photo exceeds the facebook limit of 4.0MB (currently 5.0MB)'
+    );
+  });
+
+  it('does not call checkMediaLimits when checkValidity already failed', async () => {
+    const provider = {
+      checkValidity: jest.fn().mockResolvedValue('Story should have at least one media'),
+      checkMediaLimits: jest.fn(),
+      maxLength: () => 1000,
+    };
+    const { service } = makePostsService({ provider });
+
+    const [result] = await service.validatePosts('org-1', [
+      {
+        integration: { id: 'integration-1' },
+        settings: {},
+        value: [{ content: 'hello', image: [] }],
+      },
+    ]);
+
+    expect(provider.checkMediaLimits).not.toHaveBeenCalled();
+    expect(result.errors).toBe('Story should have at least one media');
+  });
+
+  it('passes through when both checks succeed', async () => {
+    const provider = {
+      checkValidity: jest.fn().mockResolvedValue(true),
+      checkMediaLimits: jest.fn().mockResolvedValue(true),
+      maxLength: () => 1000,
+    };
+    const { service } = makePostsService({ provider });
+
+    const [result] = await service.validatePosts('org-1', [
+      {
+        integration: { id: 'integration-1' },
+        settings: {},
+        value: [{ content: 'hello', image: [] }],
+      },
+    ]);
+
+    expect(result.errors).toBe(true);
+  });
+});

@@ -1095,6 +1095,14 @@ export class PostsService {
           errors = err?.message || 'Invalid media';
         }
 
+        if (errors === true) {
+          try {
+            errors = await provider.checkMediaLimits(media);
+          } catch (err: any) {
+            errors = err?.message || 'Invalid media';
+          }
+        }
+
         const maximumCharacters = provider.maxLength(additionalSettings);
         const isX = integration.providerIdentifier === 'x';
 
