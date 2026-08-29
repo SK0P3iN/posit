@@ -258,4 +258,142 @@ export class InboxService {
       throw err;
     }
   }
+
+  async getThread(orgId: string, integrationId: string, postRemoteId: string) {
+    const integration = await this._integrationService.getIntegrationById(
+      orgId,
+      integrationId
+    );
+    if (!integration) {
+      throw new NotFoundException('Channel not found');
+    }
+    if (integration.refreshNeeded || integration.disabled) {
+      throw new BadRequestException(
+        'Reconnect the channel before viewing inbox threads'
+      );
+    }
+
+    const provider = this._integrationManager.getSocialIntegration(
+      integration.providerIdentifier
+    );
+    if (!provider?.inboxCapabilities().comments) {
+      throw new BadRequestException(
+        'This channel does not support inbox comments'
+      );
+    }
+
+    try {
+      return await provider.fetchInboxThread(
+        integration.token,
+        postRemoteId,
+        integration
+      );
+    } catch (err) {
+      if (err instanceof RefreshToken) {
+        await this._integrationService.disconnectChannel(orgId, integration);
+        throw new BadRequestException(
+          'Reconnect the channel before viewing inbox threads'
+        );
+      }
+      throw err;
+    }
+  }
+
+  async likeComment(
+    orgId: string,
+    integrationId: string,
+    commentRemoteId: string,
+    liked: boolean
+  ) {
+    const integration = await this._integrationService.getIntegrationById(
+      orgId,
+      integrationId
+    );
+    if (!integration) {
+      throw new NotFoundException('Channel not found');
+    }
+    if (integration.refreshNeeded || integration.disabled) {
+      throw new BadRequestException(
+        'Reconnect the channel before liking inbox comments'
+      );
+    }
+
+    const provider = this._integrationManager.getSocialIntegration(
+      integration.providerIdentifier
+    );
+    if (!provider?.inboxCapabilities().likes) {
+      throw new BadRequestException(
+        'This channel does not support liking inbox comments'
+      );
+    }
+
+    try {
+      return await provider.likeInboxComment(
+        integration.token,
+        commentRemoteId,
+        liked,
+        integration
+      );
+    } catch (err) {
+      if (err instanceof RefreshToken) {
+        await this._integrationService.disconnectChannel(orgId, integration);
+        throw new BadRequestException(
+          'Reconnect the channel before liking inbox comments'
+        );
+      }
+      throw err;
+    }
+  }
+
+  async replyToComment(
+    orgId: string,
+    integrationId: string,
+    commentRemoteId: string,
+    message: string
+  ) {
+    const trimmed = (message || '').trim();
+    if (!trimmed) {
+      throw new BadRequestException('Reply message is required');
+    }
+
+    const integration = await this._integrationService.getIntegrationById(
+      orgId,
+      integrationId
+    );
+    if (!integration) {
+      throw new NotFoundException('Channel not found');
+    }
+    if (integration.refreshNeeded || integration.disabled) {
+      throw new BadRequestException(
+        'Reconnect the channel before replying to inbox items'
+      );
+    }
+
+    const provider = this._integrationManager.getSocialIntegration(
+      integration.providerIdentifier
+    );
+    if (!provider?.inboxCapabilities().comments) {
+      throw new BadRequestException(
+        'This channel does not support inbox replies'
+      );
+    }
+
+    try {
+      const result = await provider.replyToInboxItem(
+        integration.token,
+        { type: 'COMMENT', remoteId: commentRemoteId },
+        trimmed,
+        integration
+      );
+      return { replyRemoteId: result?.remoteId || null };
+    } catch (err) {
+      if (err instanceof RefreshToken) {
+        await this._integrationService.disconnectChannel(orgId, integration);
+        throw new BadRequestException(
+          'Reconnect the channel before replying to inbox items'
+        );
+      }
+      throw err;
+    }
+  }
 }

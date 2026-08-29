@@ -211,3 +211,212 @@ describe('InboxService - embeddable inbox capability (U2, R1/R2/R3)', () => {
     });
   });
 });
+
+describe('InboxService - comment thread, like, and remote-id reply', () => {
+  describe('getThread', () => {
+    it('throws NotFoundException when the integration does not belong to the org', async () => {
+      const { service, integrationService } = makeInboxService({
+        integrationService: {
+          getIntegrationById: jest.fn().mockResolvedValue(null),
+        },
+      });
+
+      await expect(
+        service.getThread('org-1', 'integration-1', 'post-1')
+      ).rejects.toThrow('Channel not found');
+    });
+
+    it('throws BadRequestException when the provider does not support comments', async () => {
+      const { service } = makeInboxService({
+        integrationService: {
+          getIntegrationById: jest.fn().mockResolvedValue({
+            id: 'integration-1',
+            token: 'token',
+            refreshNeeded: false,
+            disabled: false,
+            providerIdentifier: 'youtube',
+          }),
+        },
+        integrationManager: {
+          getSocialIntegration: jest.fn().mockReturnValue({
+            inboxCapabilities: () => ({
+              comments: false,
+              mentions: false,
+              dms: false,
+              embeddable: false,
+              likes: false,
+            }),
+          }),
+        },
+      });
+
+      await expect(
+        service.getThread('org-1', 'integration-1', 'post-1')
+      ).rejects.toThrow('This channel does not support inbox comments');
+    });
+
+    it('delegates to provider.fetchInboxThread and returns its result', async () => {
+      const integration = {
+        id: 'integration-1',
+        token: 'token',
+        refreshNeeded: false,
+        disabled: false,
+        providerIdentifier: 'facebook',
+      };
+      const threadNodes = [{ remoteId: 'c1', replies: [] }];
+      const fetchInboxThread = jest.fn().mockResolvedValue(threadNodes);
+      const { service } = makeInboxService({
+        integrationService: {
+          getIntegrationById: jest.fn().mockResolvedValue(integration),
+        },
+        integrationManager: {
+          getSocialIntegration: jest.fn().mockReturnValue({
+            inboxCapabilities: () => ({
+              comments: true,
+              mentions: false,
+              dms: false,
+              embeddable: true,
+              likes: true,
+            }),
+            fetchInboxThread,
+          }),
+        },
+      });
+
+      const result = await service.getThread('org-1', 'integration-1', 'post-1');
+
+      expect(result).toBe(threadNodes);
+      expect(fetchInboxThread).toHaveBeenCalledWith('token', 'post-1', integration);
+    });
+  });
+
+  describe('likeComment', () => {
+    it('throws BadRequestException when the provider does not support likes', async () => {
+      const { service } = makeInboxService({
+        integrationService: {
+          getIntegrationById: jest.fn().mockResolvedValue({
+            id: 'integration-1',
+            token: 'token',
+            refreshNeeded: false,
+            disabled: false,
+            providerIdentifier: 'youtube',
+          }),
+        },
+        integrationManager: {
+          getSocialIntegration: jest.fn().mockReturnValue({
+            inboxCapabilities: () => ({
+              comments: true,
+              mentions: false,
+              dms: false,
+              embeddable: true,
+              likes: false,
+            }),
+          }),
+        },
+      });
+
+      await expect(
+        service.likeComment('org-1', 'integration-1', 'comment-1', true)
+      ).rejects.toThrow('This channel does not support liking inbox comments');
+    });
+
+    it('delegates to provider.likeInboxComment and returns its result', async () => {
+      const integration = {
+        id: 'integration-1',
+        token: 'token',
+        refreshNeeded: false,
+        disabled: false,
+        providerIdentifier: 'facebook',
+      };
+      const likeInboxComment = jest
+        .fn()
+        .mockResolvedValue({ liked: true, likeCount: 4 });
+      const { service } = makeInboxService({
+        integrationService: {
+          getIntegrationById: jest.fn().mockResolvedValue(integration),
+        },
+        integrationManager: {
+          getSocialIntegration: jest.fn().mockReturnValue({
+            inboxCapabilities: () => ({
+              comments: true,
+              mentions: false,
+              dms: false,
+              embeddable: true,
+              likes: true,
+            }),
+            likeInboxComment,
+          }),
+        },
+      });
+
+      const result = await service.likeComment(
+        'org-1',
+        'integration-1',
+        'comment-1',
+        true
+      );
+
+      expect(result).toEqual({ liked: true, likeCount: 4 });
+      expect(likeInboxComment).toHaveBeenCalledWith(
+        'token',
+        'comment-1',
+        true,
+        integration
+      );
+    });
+  });
+
+  describe('replyToComment', () => {
+    it('throws BadRequestException for a blank message', async () => {
+      const { service } = makeInboxService();
+      await expect(
+        service.replyToComment('org-1', 'integration-1', 'comment-1', '   ')
+      ).rejects.toThrow('Reply message is required');
+    });
+
+    it('delegates to provider.replyToInboxItem with a COMMENT target built from the remote id', async () => {
+      const integration = {
+        id: 'integration-1',
+        token: 'token',
+        refreshNeeded: false,
+        disabled: false,
+        providerIdentifier: 'facebook',
+      };
+      const replyToInboxItem = jest
+        .fn()
+        .mockResolvedValue({ remoteId: 'new-reply-1' });
+      const { service } = makeInboxService({
+        integrationService: {
+          getIntegrationById: jest.fn().mockResolvedValue(integration),
+        },
+        integrationManager: {
+          getSocialIntegration: jest.fn().mockReturnValue({
+            inboxCapabilities: () => ({
+              comments: true,
+              mentions: false,
+              dms: false,
+              embeddable: true,
+              likes: true,
+            }),
+            replyToInboxItem,
+          }),
+        },
+      });
+
+      const result = await service.replyToComment(
+        'org-1',
+        'integration-1',
+        'comment-1',
+        '  hello  '
+      );
+
+      expect(result).toEqual({ replyRemoteId: 'new-reply-1' });
+      expect(replyToInboxItem).toHaveBeenCalledWith(
+        'token',
+        { type: 'COMMENT', remoteId: 'comment-1' },
+        'hello',
+        integration
+      );
+    });
+  });
+});
