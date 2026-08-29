@@ -328,7 +328,7 @@ export type InboxCapabilities = {
   mentions: boolean;
   dms: boolean;
   embeddable: boolean;
-  likes: boolean;
+  likes?: boolean;
 };
 
 export type InboxThreadNode = {
