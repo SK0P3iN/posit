@@ -455,13 +455,14 @@ model Comments {
   content        String
   organizationId String
   postId         String
-  userId         String
+  userId         String?
+  authorName     String?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
   deletedAt      DateTime?
   organization   Organization @relation(fields: [organizationId], references: [id])
   post           Post         @relation(fields: [postId], references: [id])
-  user           User         @relation(fields: [userId], references: [id])
+  user           User?        @relation(fields: [userId], references: [id])
 
   @@index([createdAt])
   @@index([organizationId])
