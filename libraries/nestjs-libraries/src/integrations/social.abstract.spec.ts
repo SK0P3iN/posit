@@ -80,3 +80,30 @@ describe('SocialAbstract.checkMediaLimits', () => {
     expect(result).toBe(true);
   });
 });
+
+describe('SocialAbstract - inbox likes/thread defaults', () => {
+  let provider: TestProvider;
+
+  beforeEach(() => {
+    provider = new TestProvider();
+  });
+
+  it('inboxCapabilities() defaults likes to false', () => {
+    expect(provider.inboxCapabilities().likes).toBe(false);
+  });
+
+  it('fetchInboxThread defaults to an empty array', async () => {
+    const result = await provider.fetchInboxThread(
+      'token',
+      'post-1',
+      {} as any
+    );
+    expect(result).toEqual([]);
+  });
+
+  it('likeInboxComment throws for a provider that has not implemented it', async () => {
+    await expect(
+      provider.likeInboxComment('token', 'comment-1', true, {} as any)
+    ).rejects.toThrow('Inbox comment likes are not supported for this channel');
+  });
+});

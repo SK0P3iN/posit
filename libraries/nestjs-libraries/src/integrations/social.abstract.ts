@@ -6,6 +6,7 @@ import {
   FetchedInboxItem,
   InboxCapabilities,
   InboxReplyTarget,
+  InboxThreadNode,
   PendingCheckResponse,
   MediaLimit,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
@@ -207,7 +208,13 @@ export abstract class SocialAbstract {
   }
 
   public inboxCapabilities(): InboxCapabilities {
-    return { comments: false, mentions: false, dms: false, embeddable: false };
+    return {
+      comments: false,
+      mentions: false,
+      dms: false,
+      embeddable: false,
+      likes: false,
+    };
   }
 
   public async fetchInboxItems(
@@ -228,6 +235,28 @@ export abstract class SocialAbstract {
       '{}',
       '{}',
       'Inbox replies are not supported for this channel'
+    );
+  }
+
+  public async fetchInboxThread(
+    _accessToken: string,
+    _postRemoteId: string,
+    _integration: Integration
+  ): Promise<InboxThreadNode[]> {
+    return [];
+  }
+
+  public async likeInboxComment(
+    _accessToken: string,
+    _commentRemoteId: string,
+    _liked: boolean,
+    _integration: Integration
+  ): Promise<{ liked: boolean; likeCount: number }> {
+    throw new BadBody(
+      this.identifier,
+      '{}',
+      '{}',
+      'Inbox comment likes are not supported for this channel'
     );
   }
 

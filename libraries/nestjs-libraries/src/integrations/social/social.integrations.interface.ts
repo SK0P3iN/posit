@@ -254,6 +254,17 @@ export interface SocialProvider
     message: string,
     integration: Integration
   ): Promise<{ remoteId: string }>;
+  fetchInboxThread?(
+    accessToken: string,
+    postRemoteId: string,
+    integration: Integration
+  ): Promise<InboxThreadNode[]>;
+  likeInboxComment?(
+    accessToken: string,
+    commentRemoteId: string,
+    liked: boolean,
+    integration: Integration
+  ): Promise<{ liked: boolean; likeCount: number }>;
   /**
    * Optional hook (R6/R15) letting a provider derive a Story Companion Post
    * from the settings/media of the post it is attached to. Called once from
@@ -317,6 +328,21 @@ export type InboxCapabilities = {
   mentions: boolean;
   dms: boolean;
   embeddable: boolean;
+  likes: boolean;
+};
+
+export type InboxThreadNode = {
+  remoteId: string;
+  authorName?: string | null;
+  authorId?: string | null;
+  authorPicture?: string | null;
+  body: string;
+  remoteCreatedAt?: string | Date | null;
+  replyCapable: boolean;
+  likeCapable: boolean;
+  likeCount: number;
+  likedByMe: boolean;
+  replies: InboxThreadNode[];
 };
 
 export type FetchedInboxItem = {
