@@ -30,7 +30,7 @@ export const ThreadCommentNode: FC<{
     try {
       const nextLiked = !likedByMe;
       const response = await fetch(
-        `/inbox/comment/${integrationId}/${node.remoteId}/like`,
+        `/inbox/comment/${integrationId}/${encodeURIComponent(node.remoteId)}/like`,
         { method: 'POST', body: JSON.stringify({ liked: nextLiked }) }
       );
       if (!response.ok) {
@@ -58,7 +58,7 @@ export const ThreadCommentNode: FC<{
     setReplying(true);
     try {
       const response = await fetch(
-        `/inbox/comment/${integrationId}/${node.remoteId}/reply`,
+        `/inbox/comment/${integrationId}/${encodeURIComponent(node.remoteId)}/reply`,
         { method: 'POST', body: JSON.stringify({ message: replyText.trim() }) }
       );
       if (!response.ok) {

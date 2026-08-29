@@ -394,7 +394,7 @@ export const InboxComponent = () => {
                   <OpenLink remoteUrl={selectedItem.remoteUrl} />
                 )}
               </div>
-              {selectedCapability?.comments && selectedItem.threadKey && (
+              {selectedCapability?.threads && selectedItem.threadKey && (
                 <Button
                   onClick={() =>
                     modal.openModal({

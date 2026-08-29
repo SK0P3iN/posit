@@ -11,7 +11,10 @@ export const PostThreadModal: FC<{
   postRemoteId: string;
 }> = ({ integrationId, postRemoteId }) => {
   const t = useT();
-  const { data, isLoading, mutate } = useInboxThread(integrationId, postRemoteId);
+  const { data, error, isLoading, mutate } = useInboxThread(
+    integrationId,
+    postRemoteId
+  );
 
   if (isLoading) {
     return (
@@ -21,7 +24,18 @@ export const PostThreadModal: FC<{
     );
   }
 
-  if (!data || data.length === 0) {
+  if (error) {
+    return (
+      <div className="text-center text-textColor py-[20px] text-[14px]">
+        {t(
+          'inbox_thread_error',
+          'Could not load this thread. Try reconnecting the channel.'
+        )}
+      </div>
+    );
+  }
+
+  if (!Array.isArray(data) || data.length === 0) {
     return (
       <div className="text-center text-textColor py-[20px] text-[14px]">
         {t('inbox_thread_empty', 'No comments yet on this post.')}

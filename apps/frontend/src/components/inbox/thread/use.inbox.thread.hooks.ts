@@ -25,13 +25,15 @@ export const useInboxThread = (
   const fetch = useFetch();
 
   const load = useCallback(async () => {
-    return (
-      await fetch(
-        `/inbox/thread/${integrationId}/${encodeURIComponent(
-          postRemoteId as string
-        )}`
-      )
-    ).json() as Promise<InboxThreadNode[]>;
+    const response = await fetch(
+      `/inbox/thread/${integrationId}/${encodeURIComponent(
+        postRemoteId as string
+      )}`
+    );
+    if (!response.ok) {
+      throw new Error('Could not load the thread');
+    }
+    return response.json() as Promise<InboxThreadNode[]>;
   }, [fetch, integrationId, postRemoteId]);
 
   return useSWR(

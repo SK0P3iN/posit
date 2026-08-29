@@ -74,7 +74,8 @@ export type InboxChannelCapabilities = {
   mentions: boolean;
   dms: boolean;
   embeddable: boolean;
-  likes: boolean;
+  likes?: boolean;
+  threads?: boolean;
   supported: boolean;
 };
 

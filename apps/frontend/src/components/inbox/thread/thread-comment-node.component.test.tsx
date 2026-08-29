@@ -77,6 +77,39 @@ it('clicking like calls the like endpoint and updates the count/state from the r
   );
 });
 
+it('percent-encodes the remote id in the like and reply URLs', async () => {
+  mockFetch.mockResolvedValue({ ok: true, json: async () => ({ liked: true, likeCount: 3 }) });
+
+  render(
+    <ThreadCommentNode
+      node={makeNode({ remoteId: 'a/b?c&d' })}
+      integrationId="integration-1"
+      depth={0}
+      onChanged={jest.fn()}
+    />
+  );
+
+  fireEvent.click(screen.getByText('2'));
+  await waitFor(() =>
+    expect(mockFetch).toHaveBeenCalledWith(
+      '/inbox/comment/integration-1/a%2Fb%3Fc%26d/like',
+      expect.anything()
+    )
+  );
+
+  fireEvent.click(screen.getByText('Reply'));
+  fireEvent.change(screen.getByPlaceholderText('Write a reply...'), {
+    target: { value: 'hi' },
+  });
+  fireEvent.click(screen.getByText('Send reply'));
+  await waitFor(() =>
+    expect(mockFetch).toHaveBeenCalledWith(
+      '/inbox/comment/integration-1/a%2Fb%3Fc%26d/reply',
+      expect.anything()
+    )
+  );
+});
+
 it('shows a toast and leaves the count unchanged when the like request fails', async () => {
   mockFetch.mockResolvedValueOnce({
     ok: false,
