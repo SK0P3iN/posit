@@ -461,6 +461,41 @@ describe('PostsRepository - anonymous review comments', () => {
   });
 });
 
+describe('PostsRepository - calendar comment count', () => {
+  function makeFakePostDelegateWithCount(count: number) {
+    return {
+      findMany: jest.fn().mockResolvedValue([
+        {
+          id: 'post-1',
+          publishDate: new Date('2026-01-01T00:00:00Z'),
+          intervalInDays: null,
+          _count: { comments: count },
+        },
+      ]),
+    };
+  }
+
+  it('flattens the comments _count into a commentsCount field', async () => {
+    const postDelegate = makeFakePostDelegateWithCount(2);
+    const repository = new PostsRepository(
+      { model: { post: postDelegate } } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any
+    );
+
+    const result = await repository.getPosts('org-1', {
+      startDate: '2026-01-01T00:00:00Z',
+      endDate: '2026-01-02T00:00:00Z',
+    } as any);
+
+    expect(result[0].commentsCount).toBe(2);
+    expect((result[0] as any)._count).toBeUndefined();
+  });
+});
+
 describe('PostsService - anonymous review comments', () => {
   afterEach(() => {
     jest.clearAllMocks();

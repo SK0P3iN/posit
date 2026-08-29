@@ -197,26 +197,34 @@ export class PostsRepository {
             refreshNeeded: true,
           },
         },
+        _count: {
+          select: {
+            comments: true,
+          },
+        },
       },
     });
 
-    return list.reduce((all, post) => {
-      if (!post.intervalInDays) {
-        return [...all, post];
+    return list.reduce((all, post: any) => {
+      const { _count, ...rest } = post;
+      const flattened = { ...rest, commentsCount: _count.comments };
+
+      if (!flattened.intervalInDays) {
+        return [...all, flattened];
       }
 
       const addMorePosts = [];
-      let startingDate = dayjs.utc(post.publishDate);
+      let startingDate = dayjs.utc(flattened.publishDate);
       while (dayjs.utc(endDate).isSameOrAfter(startingDate)) {
-        if (dayjs(startingDate).isSameOrAfter(dayjs.utc(post.publishDate))) {
+        if (dayjs(startingDate).isSameOrAfter(dayjs.utc(flattened.publishDate))) {
           addMorePosts.push({
-            ...post,
+            ...flattened,
             publishDate: startingDate.toDate(),
-            actualDate: post.publishDate,
+            actualDate: flattened.publishDate,
           });
         }
 
-        startingDate = startingDate.add(post.intervalInDays, 'days');
+        startingDate = startingDate.add(flattened.intervalInDays, 'days');
       }
 
       return [...all, ...addMorePosts];
