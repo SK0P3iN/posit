@@ -48,9 +48,9 @@ it('renders the comment body, nested replies, and the like count', () => {
     />
   );
 
-  expect(screen.getByText('top comment')).toBeInTheDocument();
-  expect(screen.getByText('a reply')).toBeInTheDocument();
-  expect(screen.getByText('2')).toBeInTheDocument();
+  screen.getByText('top comment');
+  screen.getByText('a reply');
+  screen.getByText('2');
 });
 
 it('clicking like calls the like endpoint and updates the count/state from the response', async () => {
@@ -70,7 +70,7 @@ it('clicking like calls the like endpoint and updates the count/state from the r
 
   fireEvent.click(screen.getByText('2'));
 
-  await waitFor(() => expect(screen.getByText('3')).toBeInTheDocument());
+  await waitFor(() => screen.getByText('3'));
   expect(mockFetch).toHaveBeenCalledWith(
     '/inbox/comment/integration-1/c1/like',
     { method: 'POST', body: JSON.stringify({ liked: true }) }
@@ -95,7 +95,7 @@ it('shows a toast and leaves the count unchanged when the like request fails', a
   fireEvent.click(screen.getByText('2'));
 
   await waitFor(() => expect(mockToasterShow).toHaveBeenCalledWith('nope', 'warning'));
-  expect(screen.getByText('2')).toBeInTheDocument();
+  screen.getByText('2');
 });
 
 it('opening reply, typing, and sending calls the reply endpoint and clears the box', async () => {
