@@ -3,6 +3,7 @@ import {
   AuthTokenDetails,
   CompanionDerivationContext,
   CompanionDerivationResult,
+  InboxThreadNode,
   PendingCheckResponse,
   PostDetails,
   PostResponse,
@@ -1155,7 +1156,13 @@ export class InstagramProvider
   }
 
   override inboxCapabilities() {
-    return { comments: true, mentions: false, dms: false, embeddable: true };
+    return {
+      comments: true,
+      mentions: false,
+      dms: false,
+      embeddable: true,
+      likes: true,
+    };
   }
 
   override async fetchInboxItems(
@@ -1210,6 +1217,53 @@ export class InstagramProvider
       )
     ).json();
     return { remoteId: String(id) };
+  }
+
+  override async fetchInboxThread(
+    token: string,
+    postRemoteId: string,
+    _integration: Integration,
+    type = 'graph.facebook.com'
+  ): Promise<InboxThreadNode[]> {
+    const [accessToken] = token.split('___');
+    const media = await (
+      await this.fetch(
+        `https://${type}/${GRAPH_API_VERSION}/${postRemoteId}?fields=comments.limit(50){id,text,username,from,timestamp,like_count,replies.limit(50){id,text,username,from,timestamp,like_count}}&access_token=${accessToken}`
+      )
+    ).json();
+
+    const mapComment = (comment: any): InboxThreadNode => ({
+      remoteId: String(comment.id),
+      authorName: comment.username || comment.from?.username || null,
+      authorId: comment.from?.id || null,
+      authorPicture: null,
+      body: comment.text || '',
+      remoteCreatedAt: comment.timestamp || null,
+      replyCapable: true,
+      likeCapable: true,
+      likeCount: comment.like_count || 0,
+      // Instagram's Graph API does not expose a "liked by me" read field for
+      // comments (see the plan's "Known limitation" note) — always false.
+      likedByMe: false,
+      replies: (comment.replies?.data || []).map(mapComment),
+    });
+
+    return (media?.comments?.data || []).map(mapComment);
+  }
+
+  override async likeInboxComment(
+    token: string,
+    commentRemoteId: string,
+    liked: boolean,
+    _integration: Integration,
+    type = 'graph.facebook.com'
+  ): Promise<{ liked: boolean; likeCount: number }> {
+    const [accessToken] = token.split('___');
+    await this.fetch(
+      `https://${type}/${GRAPH_API_VERSION}/${commentRemoteId}/likes?access_token=${accessToken}`,
+      { method: liked ? 'POST' : 'DELETE' }
+    );
+    return { liked, likeCount: 0 };
   }
 
   async comment(

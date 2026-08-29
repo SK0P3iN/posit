@@ -895,3 +895,121 @@ describe('InstagramProvider - Graph API version (R13/U1)', () => {
     });
   });
 });
+
+describe('InstagramProvider - inbox comment likes and threads', () => {
+  let provider: InstagramProvider;
+  let fetchMock: jest.Mock;
+
+  beforeEach(() => {
+    provider = new InstagramProvider();
+    fetchMock = jest.fn();
+    (global as any).fetch = fetchMock;
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('inboxCapabilities() reports likes: true', () => {
+    expect(provider.inboxCapabilities().likes).toBe(true);
+  });
+
+  it('fetchInboxThread maps nested replies, always with likedByMe: false', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        comments: {
+          data: [
+            {
+              id: 'ig-c1',
+              text: 'top comment',
+              username: 'alice',
+              from: { id: 'u1' },
+              timestamp: '2026-08-01T00:00:00Z',
+              like_count: 5,
+              replies: {
+                data: [
+                  {
+                    id: 'ig-c1-r1',
+                    text: 'a reply',
+                    username: 'bob',
+                    from: { id: 'u2' },
+                    timestamp: '2026-08-01T01:00:00Z',
+                    like_count: 0,
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      })
+    );
+
+    const result = await provider.fetchInboxThread(
+      'token-123___page-1',
+      'media-1',
+      {} as any
+    );
+
+    expect(result).toEqual([
+      {
+        remoteId: 'ig-c1',
+        authorName: 'alice',
+        authorId: 'u1',
+        authorPicture: null,
+        body: 'top comment',
+        remoteCreatedAt: '2026-08-01T00:00:00Z',
+        replyCapable: true,
+        likeCapable: true,
+        likeCount: 5,
+        likedByMe: false,
+        replies: [
+          {
+            remoteId: 'ig-c1-r1',
+            authorName: 'bob',
+            authorId: 'u2',
+            authorPicture: null,
+            body: 'a reply',
+            remoteCreatedAt: '2026-08-01T01:00:00Z',
+            replyCapable: true,
+            likeCapable: true,
+            likeCount: 0,
+            likedByMe: false,
+            replies: [],
+          },
+        ],
+      },
+    ]);
+    expect(fetchMock.mock.calls[0][0]).toContain('access_token=token-123');
+    expect(fetchMock.mock.calls[0][0]).not.toContain('page-1');
+  });
+
+  it('likeInboxComment(liked: true) POSTs to /likes using the split access token', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ success: true }));
+
+    const result = await provider.likeInboxComment(
+      'token-123___page-1',
+      'ig-c1',
+      true,
+      {} as any
+    );
+
+    expect(result).toEqual({ liked: true, likeCount: 0 });
+    expect(fetchMock.mock.calls[0][0]).toContain('ig-c1/likes');
+    expect(fetchMock.mock.calls[0][0]).toContain('access_token=token-123');
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('POST');
+  });
+
+  it('likeInboxComment(liked: false) DELETEs /likes', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ success: true }));
+
+    const result = await provider.likeInboxComment(
+      'token-123___page-1',
+      'ig-c1',
+      false,
+      {} as any
+    );
+
+    expect(result).toEqual({ liked: false, likeCount: 0 });
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('DELETE');
+  });
+});
