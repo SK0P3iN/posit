@@ -62,6 +62,7 @@ import {
   MediaMissingBadge,
   mediaMissingRingClass,
 } from '@gitroom/frontend/components/media/media.missing.badge';
+import { CommentCountBadge } from '@gitroom/frontend/components/launches/comment.count.badge';
 
 // Extend dayjs with necessary plugins
 extend(isSameOrAfter);
@@ -993,6 +994,7 @@ const CalendarItem: FC<{
     tags: {
       tag: Tags;
     }[];
+    commentsCount?: number;
   };
 }> = memo((props) => {
   const t = useT();
@@ -1091,6 +1093,7 @@ const CalendarItem: FC<{
         </div>
       )}
       {post.mediaMissing && <MediaMissingBadge />}
+      <CommentCountBadge count={post.commentsCount || 0} />
       {showCreationMethodBadge && (
         <div className="absolute -bottom-[4px] -right-[4px] z-10">
           <CreationMethodBadge
