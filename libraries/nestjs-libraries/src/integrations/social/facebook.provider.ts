@@ -3,6 +3,7 @@ import {
   AuthTokenDetails,
   CompanionDerivationContext,
   CompanionDerivationResult,
+  InboxThreadNode,
   PendingCheckResponse,
   PostDetails,
   PostResponse,
@@ -978,7 +979,13 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
   }
 
   override inboxCapabilities() {
-    return { comments: true, mentions: false, dms: false, embeddable: true };
+    return {
+      comments: true,
+      mentions: false,
+      dms: false,
+      embeddable: true,
+      likes: true,
+    };
   }
 
   override async fetchInboxItems(
@@ -1029,6 +1036,53 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
       )
     ).json();
     return { remoteId: String(data.id) };
+  }
+
+  override async fetchInboxThread(
+    accessToken: string,
+    postRemoteId: string,
+    _integration: Integration
+  ): Promise<InboxThreadNode[]> {
+    const post = await (
+      await this.fetch(
+        `https://graph.facebook.com/v20.0/${postRemoteId}?fields=comments.limit(50){id,message,from,created_time,like_count,user_likes,comments.limit(50){id,message,from,created_time,like_count,user_likes}}&access_token=${accessToken}`
+      )
+    ).json();
+
+    const mapComment = (comment: any): InboxThreadNode => ({
+      remoteId: String(comment.id),
+      authorName: comment.from?.name || null,
+      authorId: comment.from?.id || null,
+      authorPicture: null,
+      body: comment.message || '',
+      remoteCreatedAt: comment.created_time || null,
+      replyCapable: true,
+      likeCapable: true,
+      likeCount: comment.like_count || 0,
+      likedByMe: !!comment.user_likes,
+      replies: (comment.comments?.data || []).map(mapComment),
+    });
+
+    return (post?.comments?.data || []).map(mapComment);
+  }
+
+  override async likeInboxComment(
+    accessToken: string,
+    commentRemoteId: string,
+    liked: boolean
+  ): Promise<{ liked: boolean; likeCount: number }> {
+    await this.fetch(
+      `https://graph.facebook.com/v20.0/${commentRemoteId}/likes?access_token=${accessToken}`,
+      { method: liked ? 'POST' : 'DELETE' }
+    );
+
+    const detail = await (
+      await this.fetch(
+        `https://graph.facebook.com/v20.0/${commentRemoteId}?fields=like_count,user_likes&access_token=${accessToken}`
+      )
+    ).json();
+
+    return { liked: !!detail.user_likes, likeCount: detail.like_count || 0 };
   }
 
   async comment(
