@@ -211,7 +211,8 @@ export class MediaController {
     @Req() req: Request,
     @Body('name') name: string,
     @Body('originalName') originalName: string,
-    @Body('folderId') folderId?: string
+    @Body('folderId') folderId?: string,
+    @Body('fileSize') fileSize?: number
   ) {
     if (!name) {
       return false;
@@ -221,7 +222,8 @@ export class MediaController {
       name,
       process.env.CLOUDFLARE_BUCKET_URL + '/' + name,
       originalName || undefined,
-      folderId || undefined
+      folderId || undefined,
+      fileSize
     );
   }
 
@@ -276,6 +278,7 @@ export class MediaController {
     const name = upload.Location.split('/').pop();
     const originalName = req.body?.file?.name;
     const folderId = req.body?.folderId;
+    const fileSize = req.body?.file?.size;
 
     const saveFile = await this._mediaService.saveFile(
       org.id,
@@ -283,7 +286,8 @@ export class MediaController {
       // @ts-ignore
       upload.Location,
       originalName || undefined,
-      folderId || undefined
+      folderId || undefined,
+      fileSize
     );
 
     res.status(200).json({ ...upload, saved: saveFile });

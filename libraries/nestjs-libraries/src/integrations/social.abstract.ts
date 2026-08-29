@@ -266,6 +266,7 @@ export abstract class SocialAbstract {
         method: 'HEAD',
         headers: { 'accept-encoding': 'identity' },
         dispatcher: getSsrfSafeDispatcher(),
+        signal: AbortSignal.timeout(5000),
       } as any);
       const length = Number(head.headers.get('content-length'));
       // A failed HEAD can still carry a content-length (of the error body),
