@@ -1,4 +1,5 @@
 import { GRAPH_API_VERSION, InstagramProvider } from './instagram.provider';
+import { InstagramStandaloneProvider } from './instagram.standalone.provider';
 import { Integration } from '@prisma/client';
 import { ioRedis } from '@gitroom/nestjs-libraries/redis/redis.service';
 
@@ -912,6 +913,23 @@ describe('InstagramProvider - inbox comment likes and threads', () => {
 
   it('inboxCapabilities() reports likes: true', () => {
     expect(provider.inboxCapabilities().likes).toBe(true);
+  });
+
+  it('inboxCapabilities() reports threads: true', () => {
+    expect(provider.inboxCapabilities().threads).toBe(true);
+  });
+
+  it('the standalone Instagram provider forces likes and threads off despite delegating to this provider', () => {
+    const standalone = new InstagramStandaloneProvider();
+    // the delegate reports both as true...
+    expect(provider.inboxCapabilities().likes).toBe(true);
+    expect(provider.inboxCapabilities().threads).toBe(true);
+    // ...but the standalone login cannot honor either.
+    expect(standalone.inboxCapabilities()).toEqual({
+      ...provider.inboxCapabilities(),
+      likes: false,
+      threads: false,
+    });
   });
 
   it('fetchInboxThread maps nested replies, always with likedByMe: false', async () => {

@@ -255,6 +255,39 @@ describe('InboxService - comment thread, like, and remote-id reply', () => {
       ).rejects.toThrow('This channel does not support inbox comments');
     });
 
+    it('throws BadRequestException for a provider that lists comments but not threads (youtube)', async () => {
+      const fetchInboxThread = jest.fn();
+      const { service } = makeInboxService({
+        integrationService: {
+          getIntegrationById: jest.fn().mockResolvedValue({
+            id: 'integration-1',
+            token: 'token',
+            refreshNeeded: false,
+            disabled: false,
+            providerIdentifier: 'youtube',
+          }),
+        },
+        integrationManager: {
+          getSocialIntegration: jest.fn().mockReturnValue({
+            inboxCapabilities: () => ({
+              comments: true,
+              mentions: false,
+              dms: false,
+              embeddable: false,
+              likes: false,
+              threads: false,
+            }),
+            fetchInboxThread,
+          }),
+        },
+      });
+
+      await expect(
+        service.getThread('org-1', 'integration-1', 'post-1')
+      ).rejects.toThrow('This channel does not support inbox comments');
+      expect(fetchInboxThread).not.toHaveBeenCalled();
+    });
+
     it('delegates to provider.fetchInboxThread and returns its result', async () => {
       const integration = {
         id: 'integration-1',
@@ -277,6 +310,7 @@ describe('InboxService - comment thread, like, and remote-id reply', () => {
               dms: false,
               embeddable: true,
               likes: true,
+              threads: true,
             }),
             fetchInboxThread,
           }),

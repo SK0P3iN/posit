@@ -329,6 +329,8 @@ export type InboxCapabilities = {
   dms: boolean;
   embeddable: boolean;
   likes?: boolean;
+  /** Provider actually implements `fetchInboxThread` (live thread view). */
+  threads?: boolean;
 };
 
 export type InboxThreadNode = {

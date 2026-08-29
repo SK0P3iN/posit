@@ -1162,6 +1162,7 @@ export class InstagramProvider
       dms: false,
       embeddable: true,
       likes: true,
+      threads: true,
     };
   }
 
@@ -1228,7 +1229,9 @@ export class InstagramProvider
     const [accessToken] = token.split('___');
     const media = await (
       await this.fetch(
-        `https://${type}/${GRAPH_API_VERSION}/${postRemoteId}?fields=comments.limit(50){id,text,username,from,timestamp,like_count,replies.limit(50){id,text,username,from,timestamp,like_count}}&access_token=${accessToken}`
+        `https://${type}/${GRAPH_API_VERSION}/${encodeURIComponent(
+          postRemoteId
+        )}?fields=comments.limit(50){id,text,username,from,timestamp,like_count,replies.limit(50){id,text,username,from,timestamp,like_count}}&access_token=${accessToken}`
       )
     ).json();
 
@@ -1260,7 +1263,9 @@ export class InstagramProvider
   ): Promise<{ liked: boolean; likeCount: number }> {
     const [accessToken] = token.split('___');
     await this.fetch(
-      `https://${type}/${GRAPH_API_VERSION}/${commentRemoteId}/likes?access_token=${accessToken}`,
+      `https://${type}/${GRAPH_API_VERSION}/${encodeURIComponent(
+        commentRemoteId
+      )}/likes?access_token=${accessToken}`,
       { method: liked ? 'POST' : 'DELETE' }
     );
     return { liked, likeCount: 0 };

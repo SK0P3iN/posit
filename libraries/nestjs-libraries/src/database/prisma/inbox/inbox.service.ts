@@ -276,7 +276,7 @@ export class InboxService {
     const provider = this._integrationManager.getSocialIntegration(
       integration.providerIdentifier
     );
-    if (!provider?.inboxCapabilities().comments) {
+    if (!provider?.inboxCapabilities().threads) {
       throw new BadRequestException(
         'This channel does not support inbox comments'
       );

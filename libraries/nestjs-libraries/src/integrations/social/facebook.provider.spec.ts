@@ -205,6 +205,10 @@ describe('FacebookProvider', () => {
       expect(provider.inboxCapabilities().likes).toBe(true);
     });
 
+    it('inboxCapabilities() reports threads: true', () => {
+      expect(provider.inboxCapabilities().threads).toBe(true);
+    });
+
     it('fetchInboxThread maps nested replies into InboxThreadNode.replies', async () => {
       fetchMock.mockResolvedValueOnce(
         jsonResponse({
@@ -293,6 +297,21 @@ describe('FacebookProvider', () => {
         'https://graph.facebook.com/v20.0/comment-1/likes?access_token=token-123'
       );
       expect(fetchMock.mock.calls[0][1]?.method).toBe('POST');
+    });
+
+    it('percent-encodes remote ids so they cannot redirect the Graph API call', async () => {
+      fetchMock.mockResolvedValue(jsonResponse({}));
+
+      await provider.fetchInboxThread('token-123', 'a/b?c&d', {} as any);
+      expect(fetchMock.mock.calls[0][0]).toContain(
+        'https://graph.facebook.com/v20.0/a%2Fb%3Fc%26d?fields='
+      );
+
+      fetchMock.mockClear();
+      await provider.likeInboxComment('token-123', 'a/b?c&d', true, {} as any);
+      expect(fetchMock.mock.calls[0][0]).toBe(
+        'https://graph.facebook.com/v20.0/a%2Fb%3Fc%26d/likes?access_token=token-123'
+      );
     });
 
     it('likeInboxComment(liked: false) DELETEs /likes and returns the refreshed state', async () => {

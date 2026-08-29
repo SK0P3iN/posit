@@ -985,6 +985,7 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
       dms: false,
       embeddable: true,
       likes: true,
+      threads: true,
     };
   }
 
@@ -1045,7 +1046,9 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
   ): Promise<InboxThreadNode[]> {
     const post = await (
       await this.fetch(
-        `https://graph.facebook.com/v20.0/${postRemoteId}?fields=comments.limit(50){id,message,from,created_time,like_count,user_likes,comments.limit(50){id,message,from,created_time,like_count,user_likes}}&access_token=${accessToken}`
+        `https://graph.facebook.com/v20.0/${encodeURIComponent(
+          postRemoteId
+        )}?fields=comments.limit(50){id,message,from,created_time,like_count,user_likes,comments.limit(50){id,message,from,created_time,like_count,user_likes}}&access_token=${accessToken}`
       )
     ).json();
 
@@ -1073,13 +1076,17 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
     _integration: Integration
   ): Promise<{ liked: boolean; likeCount: number }> {
     await this.fetch(
-      `https://graph.facebook.com/v20.0/${commentRemoteId}/likes?access_token=${accessToken}`,
+      `https://graph.facebook.com/v20.0/${encodeURIComponent(
+        commentRemoteId
+      )}/likes?access_token=${accessToken}`,
       { method: liked ? 'POST' : 'DELETE' }
     );
 
     const detail = await (
       await this.fetch(
-        `https://graph.facebook.com/v20.0/${commentRemoteId}?fields=like_count,user_likes&access_token=${accessToken}`
+        `https://graph.facebook.com/v20.0/${encodeURIComponent(
+          commentRemoteId
+        )}?fields=like_count,user_likes&access_token=${accessToken}`
       )
     ).json();
 

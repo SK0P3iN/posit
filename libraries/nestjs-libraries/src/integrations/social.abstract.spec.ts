@@ -92,13 +92,14 @@ describe('SocialAbstract - inbox likes/thread defaults', () => {
     expect(provider.inboxCapabilities().likes).toBe(false);
   });
 
-  it('fetchInboxThread defaults to an empty array', async () => {
-    const result = await provider.fetchInboxThread(
-      'token',
-      'post-1',
-      {} as any
-    );
-    expect(result).toEqual([]);
+  it('inboxCapabilities() defaults threads to false', () => {
+    expect(provider.inboxCapabilities().threads).toBe(false);
+  });
+
+  it('fetchInboxThread throws for a provider that has not implemented it', async () => {
+    await expect(
+      provider.fetchInboxThread('token', 'post-1', {} as any)
+    ).rejects.toThrow('Inbox thread view is not supported for this channel');
   });
 
   it('likeInboxComment throws for a provider that has not implemented it', async () => {

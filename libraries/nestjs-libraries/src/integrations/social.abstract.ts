@@ -214,6 +214,7 @@ export abstract class SocialAbstract {
       dms: false,
       embeddable: false,
       likes: false,
+      threads: false,
     };
   }
 
@@ -243,7 +244,12 @@ export abstract class SocialAbstract {
     _postRemoteId: string,
     _integration: Integration
   ): Promise<InboxThreadNode[]> {
-    return [];
+    throw new BadBody(
+      this.identifier,
+      '{}',
+      '{}',
+      'Inbox thread view is not supported for this channel'
+    );
   }
 
   public async likeInboxComment(

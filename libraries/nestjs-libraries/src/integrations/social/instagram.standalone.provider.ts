@@ -215,7 +215,15 @@ export class InstagramStandaloneProvider
 
   // the graph domain travels inside pendingData, so these are pure delegations
   override inboxCapabilities() {
-    return instagramProvider.inboxCapabilities();
+    // Meta's comment-like and full-thread endpoints only work for Instagram
+    // accounts connected through Facebook Business login — a standalone
+    // Instagram login (this provider) cannot honor them, so force them off
+    // instead of inheriting the delegate's `true`.
+    return {
+      ...instagramProvider.inboxCapabilities(),
+      likes: false,
+      threads: false,
+    };
   }
 
   override async fetchInboxItems(
