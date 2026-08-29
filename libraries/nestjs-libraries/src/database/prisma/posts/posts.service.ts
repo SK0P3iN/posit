@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  NotFoundException,
   ValidationPipe,
 } from '@nestjs/common';
 import { PostsRepository } from '@gitroom/nestjs-libraries/database/prisma/posts/posts.repository';
@@ -20,6 +21,7 @@ import { GetPostsListDto } from '@gitroom/nestjs-libraries/dtos/posts/get.posts.
 import { shuffle } from 'lodash';
 import { CreateGeneratedPostsDto } from '@gitroom/nestjs-libraries/dtos/generator/create.generated.posts.dto';
 import { IntegrationService } from '@gitroom/nestjs-libraries/database/prisma/integrations/integration.service';
+import { NotificationService } from '@gitroom/nestjs-libraries/database/prisma/notifications/notification.service';
 import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import utc from 'dayjs/plugin/utc';
 import { MediaService } from '@gitroom/nestjs-libraries/database/prisma/media/media.service';
@@ -75,7 +77,8 @@ export class PostsService {
     private _temporalService: TemporalService,
     private _refreshIntegrationService: RefreshIntegrationService,
     private _subscriptionService: SubscriptionService,
-    private _organizationService: OrganizationService
+    private _organizationService: OrganizationService,
+    private _notificationService: NotificationService
   ) {}
 
   searchForMissingThreeHoursPosts() {
@@ -1483,12 +1486,55 @@ export class PostsService {
     return this._postRepository.deleteTag(id, orgId);
   }
 
-  createComment(
+  async createComment(
     orgId: string,
     userId: string,
     postId: string,
     comment: string
   ) {
-    return this._postRepository.createComment(orgId, userId, postId, comment);
+    const created = await this._postRepository.createComment(
+      orgId,
+      userId,
+      postId,
+      comment
+    );
+    await this.notifyNewComment(orgId, postId);
+    return created;
+  }
+
+  async createPublicComment(postId: string, name: string, content: string) {
+    const post = await this._postRepository.getPost(postId);
+    if (!post) {
+      throw new NotFoundException('Post not found');
+    }
+
+    const anonymousCount = await this._postRepository.countAnonymousComments(
+      postId
+    );
+    if (anonymousCount >= 3) {
+      throw new BadRequestException(
+        'This post has reached its review comment limit'
+      );
+    }
+
+    const created = await this._postRepository.createPublicComment(
+      post.organizationId,
+      postId,
+      name,
+      content
+    );
+    await this.notifyNewComment(post.organizationId, postId);
+    return created;
+  }
+
+  private async notifyNewComment(orgId: string, postId: string) {
+    await this._notificationService.inAppNotification(
+      orgId,
+      'New comment on your post',
+      `Someone left a new comment on one of your posts. Check it out: ${process.env.FRONTEND_URL}/p/${postId}`,
+      true,
+      false,
+      'info'
+    );
   }
 }

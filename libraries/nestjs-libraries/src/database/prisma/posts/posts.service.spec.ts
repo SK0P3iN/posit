@@ -62,6 +62,7 @@ function makePostsService(overrides?: {
   provider?: any;
   subscription?: Partial<Record<string, jest.Mock>>;
   organization?: Partial<Record<string, jest.Mock>>;
+  notificationService?: Partial<Record<string, jest.Mock>>;
 }) {
   const postRepository = {
     createOrUpdatePost: jest.fn().mockResolvedValue({
@@ -82,6 +83,21 @@ function makePostsService(overrides?: {
     }),
     cancelCompanionPost: jest.fn().mockResolvedValue(null),
     countPostsFromDay: jest.fn().mockResolvedValue(0),
+    getPost: jest.fn().mockResolvedValue({
+      id: 'post-1',
+      organizationId: 'org-1',
+    }),
+    countAnonymousComments: jest.fn().mockResolvedValue(0),
+    createPublicComment: jest.fn().mockResolvedValue({
+      id: 'comment-1',
+      authorName: 'Jane Reviewer',
+      content: 'Looks great!',
+    }),
+    createComment: jest.fn().mockResolvedValue({
+      id: 'comment-1',
+      userId: 'user-1',
+      content: 'Looks great!',
+    }),
     ...overrides?.postRepository,
   } as unknown as PostsRepository;
 
@@ -128,6 +144,11 @@ function makePostsService(overrides?: {
     ...overrides?.organization,
   };
 
+  const notificationService = {
+    inAppNotification: jest.fn().mockResolvedValue(undefined),
+    ...overrides?.notificationService,
+  };
+
   const service = new PostsService(
     postRepository,
     integrationManager as any,
@@ -138,10 +159,11 @@ function makePostsService(overrides?: {
     temporalService as any,
     refreshIntegrationService as any,
     subscriptionService as any,
-    organizationService as any
+    organizationService as any,
+    notificationService as any
   );
 
-  return { service, postRepository, integrationManager, provider };
+  return { service, postRepository, integrationManager, provider, notificationService };
 }
 
 function makeCreatePostBody(type: 'now' | 'schedule' | 'update' | 'draft') {
@@ -436,5 +458,95 @@ describe('PostsRepository - anonymous review comments', () => {
       },
     });
     expect(result.authorName).toBe('Jane Reviewer');
+  });
+});
+
+describe('PostsService - anonymous review comments', () => {
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('creates a public comment and notifies the org when under the anonymous cap', async () => {
+    const { service, postRepository, notificationService } = makePostsService({
+      postRepository: {
+        getPost: jest.fn().mockResolvedValue({ id: 'post-1', organizationId: 'org-1' }),
+        countAnonymousComments: jest.fn().mockResolvedValue(2),
+      },
+    });
+
+    const result = await service.createPublicComment(
+      'post-1',
+      'Jane Reviewer',
+      'Looks great!'
+    );
+
+    expect(postRepository.createPublicComment).toHaveBeenCalledWith(
+      'org-1',
+      'post-1',
+      'Jane Reviewer',
+      'Looks great!'
+    );
+    expect(notificationService.inAppNotification).toHaveBeenCalledWith(
+      'org-1',
+      expect.any(String),
+      expect.stringContaining('/p/post-1'),
+      true,
+      false,
+      'info'
+    );
+    expect(result).toEqual({
+      id: 'comment-1',
+      authorName: 'Jane Reviewer',
+      content: 'Looks great!',
+    });
+  });
+
+  it('rejects a 4th anonymous comment on the same post', async () => {
+    const { service, postRepository, notificationService } = makePostsService({
+      postRepository: {
+        getPost: jest.fn().mockResolvedValue({ id: 'post-1', organizationId: 'org-1' }),
+        countAnonymousComments: jest.fn().mockResolvedValue(3),
+      },
+    });
+
+    await expect(
+      service.createPublicComment('post-1', 'Jane Reviewer', 'One more!')
+    ).rejects.toThrow();
+
+    expect(postRepository.createPublicComment).not.toHaveBeenCalled();
+    expect(notificationService.inAppNotification).not.toHaveBeenCalled();
+  });
+
+  it('throws when the post does not exist', async () => {
+    const { service } = makePostsService({
+      postRepository: {
+        getPost: jest.fn().mockResolvedValue(null),
+      },
+    });
+
+    await expect(
+      service.createPublicComment('missing-post', 'Jane Reviewer', 'Hi')
+    ).rejects.toThrow();
+  });
+
+  it('notifies the org when an authenticated comment is created', async () => {
+    const { service, postRepository, notificationService } = makePostsService();
+
+    await service.createComment('org-1', 'user-1', 'post-1', 'Looks great!');
+
+    expect(postRepository.createComment).toHaveBeenCalledWith(
+      'org-1',
+      'user-1',
+      'post-1',
+      'Looks great!'
+    );
+    expect(notificationService.inAppNotification).toHaveBeenCalledWith(
+      'org-1',
+      expect.any(String),
+      expect.stringContaining('/p/post-1'),
+      true,
+      false,
+      'info'
+    );
   });
 });
