@@ -5,6 +5,7 @@ import clsx from 'clsx';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { hasExtension } from '@gitroom/helpers/utils/has.extension';
 import { VideoFrame } from '@gitroom/react/helpers/video.frame';
+import { useMediaDirectory } from '@gitroom/react/helpers/use.media.directory';
 
 interface StorySlideMedia {
   id: string;
@@ -30,6 +31,7 @@ interface StorySlidePickerProps {
 export const StorySlidePicker: FC<StorySlidePickerProps> = (props) => {
   const { media, storyMediaId, onSelect, showFeedDivergenceNotice } = props;
   const t = useT();
+  const mediaDirectory = useMediaDirectory();
 
   if (media.length <= 1) {
     return null;
@@ -61,11 +63,13 @@ export const StorySlidePicker: FC<StorySlidePickerProps> = (props) => {
                 )}
               >
                 {hasExtension(item.path, 'mp4') ? (
-                  <VideoFrame url={item.thumbnail || item.path} />
+                  <VideoFrame
+                    url={mediaDirectory.set(item.thumbnail || item.path)}
+                  />
                 ) : (
                   <img
                     className="w-full h-full object-cover rounded-[4px]"
-                    src={item.thumbnail || item.path}
+                    src={mediaDirectory.set(item.thumbnail || item.path)}
                     alt=""
                   />
                 )}

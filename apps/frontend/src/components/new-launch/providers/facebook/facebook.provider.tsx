@@ -112,15 +112,12 @@ export const FacebookSettings = () => {
               'This republishes the same media as a separate scheduled Story post. It creates an additional post that also counts toward your organization’s monthly post limit; if you’re at your plan’s limit, the Story companion will silently be skipped.'
             )}
           </div>
-          {watch('also_share_to_story') && (
+          {alsoShareToStory && (
             <StorySlidePicker
               media={media}
               storyMediaId={storyMediaId}
               onSelect={onSelectStorySlide}
-              // KD6/KTD8: Facebook's own Feed publish path only actually
-              // publishes the first slide when it's a video, dropping the
-              // rest of the carousel - flag that divergence here rather
-              // than let it surface only as a mismatch after publish.
+              // KD6: see StorySlidePickerProps.showFeedDivergenceNotice.
               showFeedDivergenceNotice={hasExtension(media[0]?.path, 'mp4')}
             />
           )}
