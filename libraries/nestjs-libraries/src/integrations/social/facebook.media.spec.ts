@@ -126,8 +126,8 @@ describe('compressImageForFacebook', () => {
     fetchMock.mockResolvedValue(remoteResponse(Buffer.alloc(8 * 1024 * 1024)));
     // First pass too big, second pass ok
     (sharp as any).toBuffer
-      .mockResolvedValueOnce(Buffer.alloc(5 * 1024 * 1024))
-      .mockResolvedValueOnce(Buffer.alloc(3 * 1024 * 1024));
+      .mockResolvedValueOnce(Buffer.alloc(12 * 1024 * 1024))
+      .mockResolvedValueOnce(Buffer.alloc(9 * 1024 * 1024));
 
     const result = await compressImageForFacebook('https://cdn/photo.jpg');
     expect(result.buffer.length).toBeLessThanOrEqual(FACEBOOK_MAX_MEDIA_BYTES);
@@ -150,11 +150,11 @@ describe('compressImageForFacebook', () => {
 
   it('throws when compression cannot reach the limit', async () => {
     fetchMock.mockResolvedValue(remoteResponse(Buffer.alloc(1024)));
-    (sharp as any).toBuffer.mockResolvedValue(Buffer.alloc(5 * 1024 * 1024));
+    (sharp as any).toBuffer.mockResolvedValue(Buffer.alloc(12 * 1024 * 1024));
 
     await expect(
       compressImageForFacebook('https://cdn/huge.jpg')
-    ).rejects.toThrow(/Could not compress media below Facebook's 4MB limit/);
+    ).rejects.toThrow(/Could not compress media below Facebook's 10MB limit/);
   });
 });
 
@@ -225,8 +225,8 @@ describe('compressVideoForFacebook', () => {
   it('reduces video bitrate by 25 percent after an oversized result', async () => {
     fetchMock.mockResolvedValue(remoteResponse());
     (statSync as jest.Mock)
-      .mockReturnValueOnce({ size: 5 * 1024 * 1024 })
-      .mockReturnValueOnce({ size: 2 * 1024 * 1024 });
+      .mockReturnValueOnce({ size: 12 * 1024 * 1024 })
+      .mockReturnValueOnce({ size: 9 * 1024 * 1024 });
     mockProbe();
     mockSuccessfulFfmpeg();
 
@@ -237,8 +237,8 @@ describe('compressVideoForFacebook', () => {
 
     const firstArgs = (spawn as unknown as jest.Mock).mock.calls[0][1];
     const secondArgs = (spawn as unknown as jest.Mock).mock.calls[1][1];
-    expect(firstArgs[firstArgs.indexOf('-b:v') + 1]).toBe('2852k');
-    expect(secondArgs[secondArgs.indexOf('-b:v') + 1]).toBe('2139k');
+    expect(firstArgs[firstArgs.indexOf('-b:v') + 1]).toBe('7130k');
+    expect(secondArgs[secondArgs.indexOf('-b:v') + 1]).toBe('5347k');
   });
 
   it('maps ffprobe ENOENT to the ffmpeg installation error', async () => {

@@ -205,6 +205,57 @@ describe('FacebookProvider', () => {
         'multipart/form-data; boundary='
       );
     });
+
+    it('postNonStory publishes separate photo and video posts when media is mixed', async () => {
+      const publishPhotoFeedPost = jest
+        .spyOn(provider as any, 'publishPhotoFeedPost')
+        .mockResolvedValue({
+          postId: 'feed-photo',
+          releaseURL: 'https://facebook.com/feed-photo',
+        });
+      const publishVideoPost = jest
+        .spyOn(provider as any, 'publishVideoPost')
+        .mockResolvedValue({
+          postId: 'video-1',
+          releaseURL: 'https://facebook.com/reel/video-1',
+        });
+
+      const result = await (provider as any).postNonStory('page-1', 'token-1', [
+        {
+          id: 'post-1',
+          message: 'same caption',
+          media: [
+            { path: 'https://cdn/photo.jpg' },
+            { path: 'https://cdn/clip.mp4' },
+          ],
+          settings: {},
+        },
+      ]);
+
+      expect(publishPhotoFeedPost).toHaveBeenCalledWith(
+        'page-1',
+        'token-1',
+        expect.objectContaining({ message: 'same caption' }),
+        [{ path: 'https://cdn/photo.jpg' }]
+      );
+      expect(publishVideoPost).toHaveBeenCalledWith(
+        'page-1',
+        'token-1',
+        'https://cdn/clip.mp4',
+        'same caption'
+      );
+      expect(result).toEqual([
+        {
+          id: 'post-1',
+          postId: 'feed-photo',
+          releaseURL: 'https://facebook.com/feed-photo',
+          status: 'success',
+        },
+      ]);
+
+      publishPhotoFeedPost.mockRestore();
+      publishVideoPost.mockRestore();
+    });
   });
 
   describe('FacebookProvider - inbox comment likes and threads', () => {

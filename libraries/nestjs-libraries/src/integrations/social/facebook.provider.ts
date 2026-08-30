@@ -652,11 +652,10 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
    * `postPending` already reads via `firstPost.settings.post_type ===
    * 'story'` to route media through the existing Story publish path above.
    *
-   * KD6: unlike Instagram, Facebook's own Feed publish path (postNonStory)
-   * may only actually publish the first slide of a carousel when it's a
-   * video - this hook does not special-case that; it always resolves the
-   * user's selected story_media_id (or falls back to the first slide) the
-   * same way Instagram does, per KTD3/SocialAbstract.resolveCompanionMedia.
+   * KD6: when the Feed post mixes photos and videos, `postNonStory` publishes
+   * two separate Facebook posts (photos first, then video). This hook still
+   * resolves the user's selected story_media_id (or falls back to the first
+   * slide) the same way Instagram does, per KTD3/SocialAbstract.resolveCompanionMedia.
    */
   async deriveCompanionPosts(
     context: CompanionDerivationContext
@@ -869,173 +868,223 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
     }
   }
 
-  private async postNonStory(
-    id: string,
+  private splitFeedMedia(media: { path: string }[] = []) {
+    const photos = media.filter((item) => !hasExtension(item.path, 'mp4'));
+    const videos = media.filter((item) => hasExtension(item.path, 'mp4'));
+    return { photos, videos };
+  }
+
+  private async publishVideoPost(
+    pageId: string,
     accessToken: string,
-    postDetails: PostDetails<FacebookDto>[]
-  ): Promise<PostResponse[]> {
-    const [firstPost] = postDetails;
-
-    let finalId = '';
-    let finalUrl = '';
-    if (hasExtension(firstPost?.media?.[0]?.path, 'mp4')) {
-      const prepared = await this.prepareMediaForFacebook(
-        firstPost.media[0].path
+    videoPath: string,
+    message: string
+  ): Promise<{ postId: string; releaseURL: string }> {
+    const prepared = await this.prepareMediaForFacebook(videoPath);
+    if (prepared.kind !== 'video') {
+      throw new BadBody(
+        this.identifier,
+        '{}',
+        '{}',
+        'Invalid Facebook video'
       );
-      if (prepared.kind !== 'video') {
-        throw new BadBody(
-          this.identifier,
-          '{}',
-          '{}',
-          'Invalid Facebook video'
-        );
-      }
+    }
 
-      const {
-        id: videoId,
-        permalink_url,
-        ...all
-      } = await (
+    const { id: videoId } = await (
+      await this.fetch(
+        `https://graph.facebook.com/v20.0/${pageId}/videos?access_token=${accessToken}&fields=id,permalink_url`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            file_url: prepared.url,
+            description: message,
+            published: true,
+          }),
+        },
+        'upload mp4'
+      )
+    ).json();
+
+    return {
+      postId: videoId,
+      releaseURL: 'https://www.facebook.com/reel/' + videoId,
+    };
+  }
+
+  private async publishPhotoFeedPost(
+    pageId: string,
+    accessToken: string,
+    firstPost: PostDetails<FacebookDto>,
+    photos: { path: string }[]
+  ): Promise<{ postId: string; releaseURL: string }> {
+    const uploadPhotos = !photos.length
+      ? []
+      : await Promise.all(
+          photos.map(async (media) => {
+            const prepared = await this.prepareMediaForFacebook(media.path);
+            if (prepared.kind !== 'photo') {
+              throw new BadBody(
+                this.identifier,
+                '{}',
+                '{}',
+                'Invalid Facebook photo'
+              );
+            }
+            const { id: photoId } = await this.uploadPhotoBuffer(
+              pageId,
+              accessToken,
+              prepared.buffer,
+              prepared.mime,
+              false,
+              'upload images slides'
+            );
+
+            return { media_fbid: photoId };
+          })
+        );
+
+    // Background presets are only valid on text-only posts (no media) and
+    // Facebook caps them at ~130 chars, so we only attach the preset when it
+    // can apply.
+    const presetId =
+      !uploadPhotos?.length &&
+      firstPost?.settings?.text_format_preset_id &&
+      (firstPost.message?.length || 0) <= FACEBOOK_PRESET_MAX_CHARS
+        ? firstPost.settings.text_format_preset_id
+        : undefined;
+
+    const publishFeed = async (withPreset: boolean) =>
+      (
         await this.fetch(
-          `https://graph.facebook.com/v20.0/${id}/videos?access_token=${accessToken}&fields=id,permalink_url`,
+          `https://graph.facebook.com/v20.0/${pageId}/feed?access_token=${accessToken}&fields=id,permalink_url`,
           {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-              file_url: prepared.url,
-              description: firstPost.message,
+              ...(uploadPhotos?.length
+                ? { attached_media: uploadPhotos }
+                : {}),
+              ...(firstPost?.settings?.url
+                ? { link: firstPost.settings.url }
+                : {}),
+              ...(withPreset && presetId
+                ? { text_format_preset_id: presetId }
+                : {}),
+              message: firstPost.message,
               published: true,
             }),
           },
-          'upload mp4'
+          'finalize upload'
         )
       ).json();
 
-      finalUrl = 'https://www.facebook.com/reel/' + videoId;
-      finalId = videoId;
-    } else {
-      const uploadPhotos = !firstPost?.media?.length
-        ? []
-        : await Promise.all(
-            firstPost.media.map(async (media) => {
-              const prepared = await this.prepareMediaForFacebook(media.path);
-              if (prepared.kind !== 'photo') {
-                throw new BadBody(
-                  this.identifier,
-                  '{}',
-                  '{}',
-                  'Facebook carousels only support photos'
-                );
-              }
-              const { id: photoId } = await this.uploadPhotoBuffer(
-                id,
-                accessToken,
-                prepared.buffer,
-                prepared.mime,
-                false,
-                'upload images slides'
-              );
-
-              return { media_fbid: photoId };
-            })
-          );
-
-      // Background presets are only valid on text-only posts (no media) and
-      // Facebook caps them at ~130 chars, so we only attach the preset when it
-      // can apply.
-      const presetId =
-        !uploadPhotos?.length &&
-        firstPost?.settings?.text_format_preset_id &&
-        (firstPost.message?.length || 0) <= FACEBOOK_PRESET_MAX_CHARS
-          ? firstPost.settings.text_format_preset_id
-          : undefined;
-
-      const publishFeed = async (withPreset: boolean) =>
-        (
-          await this.fetch(
-            `https://graph.facebook.com/v20.0/${id}/feed?access_token=${accessToken}&fields=id,permalink_url`,
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                ...(uploadPhotos?.length
-                  ? { attached_media: uploadPhotos }
-                  : {}),
-                ...(firstPost?.settings?.url
-                  ? { link: firstPost.settings.url }
-                  : {}),
-                ...(withPreset && presetId
-                  ? { text_format_preset_id: presetId }
-                  : {}),
-                message: firstPost.message,
-                published: true,
-              }),
-            },
-            'finalize upload'
-          )
-        ).json();
-
-      // Facebook exposes no official preset list and adds/retires backgrounds
-      // over time, so a stale text_format_preset_id can make FB reject the whole
-      // post. Observed Graph API responses for a bad preset:
-      //   - malformed id  -> HTTP 400, code 100, message names
-      //                      "text_format_preset_id" explicitly
-      //   - retired numeric id -> HTTP 500, code 1, generic "unknown error"
-      //     (our fetch() retries 500s and then reports it with the body stripped)
-      // So retry once without the preset on an explicit preset error or a
-      // generic/unknown failure, but never on a recognized auth/token error
-      // (dropping the background can't fix that). A retry that only succeeds once
-      // the preset is removed confirms the preset was the cause.
-      const isPresetRejection = (err: any): boolean => {
-        const detail = `${err?.details?.[0]?.json ?? ''} ${err?.message ?? ''}`;
-        if (
-          /access token|re-authenticate|revoked|"code":\s*190\b/i.test(detail)
-        ) {
-          return false;
-        }
-        return (
-          /text_format_preset_id/i.test(detail) ||
-          /"code":\s*1\b/.test(detail) ||
-          String(err?.message) === 'Unknown Error'
-        );
-      };
-
-      let feedResult: any;
-      try {
-        feedResult = await publishFeed(!!presetId);
-      } catch (err) {
-        if (!presetId || !isPresetRejection(err)) {
-          throw err;
-        }
-        // Surface the (recovered) rejection in the logs, since the fallback
-        // below makes the activity succeed and Facebook's error would otherwise
-        // be swallowed silently.
-        console.warn(
-          'Facebook rejected text_format_preset_id — dropping the background and publishing as plain text',
-          {
-            preset: presetId,
-            facebook: (err as any)?.details?.[0]?.json,
-            message: (err as any)?.message,
-          }
-        );
-        feedResult = await publishFeed(false);
+    const isPresetRejection = (err: any): boolean => {
+      const detail = `${err?.details?.[0]?.json ?? ''} ${err?.message ?? ''}`;
+      if (
+        /access token|re-authenticate|revoked|"code":\s*190\b/i.test(detail)
+      ) {
+        return false;
       }
+      return (
+        /text_format_preset_id/i.test(detail) ||
+        /"code":\s*1\b/.test(detail) ||
+        String(err?.message) === 'Unknown Error'
+      );
+    };
 
-      const { id: postId, permalink_url, ...all } = feedResult;
-
-      finalUrl = permalink_url;
-      finalId = postId;
+    let feedResult: any;
+    try {
+      feedResult = await publishFeed(!!presetId);
+    } catch (err) {
+      if (!presetId || !isPresetRejection(err)) {
+        throw err;
+      }
+      console.warn(
+        'Facebook rejected text_format_preset_id — dropping the background and publishing as plain text',
+        {
+          preset: presetId,
+          facebook: (err as any)?.details?.[0]?.json,
+          message: (err as any)?.message,
+        }
+      );
+      feedResult = await publishFeed(false);
     }
+
+    const { id: postId, permalink_url } = feedResult;
+
+    return {
+      postId,
+      releaseURL: permalink_url,
+    };
+  }
+
+  private async postNonStory(
+    id: string,
+    accessToken: string,
+    postDetails: PostDetails<FacebookDto>[]
+  ): Promise<PostResponse[]> {
+    const [firstPost] = postDetails;
+    const { photos, videos } = this.splitFeedMedia(firstPost?.media);
+
+    if (photos.length && videos.length) {
+      const photoPost = await this.publishPhotoFeedPost(
+        id,
+        accessToken,
+        firstPost,
+        photos
+      );
+      await this.publishVideoPost(
+        id,
+        accessToken,
+        videos[0].path,
+        firstPost.message
+      );
+
+      return [
+        {
+          id: firstPost.id,
+          postId: photoPost.postId,
+          releaseURL: photoPost.releaseURL,
+          status: 'success',
+        },
+      ];
+    }
+
+    if (videos.length) {
+      const videoPost = await this.publishVideoPost(
+        id,
+        accessToken,
+        videos[0].path,
+        firstPost.message
+      );
+
+      return [
+        {
+          id: firstPost.id,
+          postId: videoPost.postId,
+          releaseURL: videoPost.releaseURL,
+          status: 'success',
+        },
+      ];
+    }
+
+    const photoPost = await this.publishPhotoFeedPost(
+      id,
+      accessToken,
+      firstPost,
+      photos
+    );
 
     return [
       {
         id: firstPost.id,
-        postId: finalId,
-        releaseURL: finalUrl,
+        postId: photoPost.postId,
+        releaseURL: photoPost.releaseURL,
         status: 'success',
       },
     ];

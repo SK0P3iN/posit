@@ -60,6 +60,10 @@ export const FacebookSettings = () => {
   // "any selected post has media" semantics).
   const media = value?.[0]?.image || [];
   const hasStoryMedia = media.length > 0;
+  const hasFeedPhotos = media.some((item) => !hasExtension(item.path, 'mp4'));
+  const hasFeedVideos = media.some((item) => hasExtension(item.path, 'mp4'));
+  const hasMixedFeedMedia =
+    postCurrentType !== 'story' && hasFeedPhotos && hasFeedVideos;
   const alsoShareToStory = watch('also_share_to_story');
   const storyMediaId = watch('story_media_id');
   const canShareToStory = hasStoryMedia && postCurrentType !== 'story';
@@ -95,6 +99,15 @@ export const FacebookSettings = () => {
           ))}
         </Select>
       </div>
+
+      {hasMixedFeedMedia && (
+        <div className="bg-tableBorder p-[10px] rounded-[10px] text-[13px] text-balance mt-[8px]">
+          {t(
+            'facebook_mixed_feed_media_notice',
+            'Facebook cannot publish photos and videos in one post. Postiz will publish two separate posts with the same caption: one for photos and one for video.'
+          )}
+        </div>
+      )}
 
       {postCurrentType !== 'story' && (
         <Input
@@ -175,5 +188,5 @@ export default withProvider<FacebookDto>({
   dto: FacebookDto,
   maximumCharacters: 63206,
   mediaCompressionNote:
-    'Media will be automatically compressed for Facebook (max 4MB, JPG/PNG/MP4 only).',
+    'Media will be automatically compressed for Facebook (max 10MB, JPG/PNG/MP4 only).',
 });

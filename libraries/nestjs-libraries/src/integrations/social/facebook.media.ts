@@ -19,7 +19,7 @@ import { getSsrfSafeDispatcher } from '@gitroom/nestjs-libraries/dtos/webhooks/s
 
 const execFileAsync = promisify(execFile);
 
-export const FACEBOOK_MAX_MEDIA_BYTES = 4 * 1024 * 1024;
+export const FACEBOOK_MAX_MEDIA_BYTES = 10 * 1024 * 1024;
 const FACEBOOK_MAX_VIDEO_INPUT_BYTES = 500 * 1024 * 1024;
 
 export class FacebookMediaCompressionError extends Error {
@@ -146,7 +146,7 @@ export async function compressImageForFacebook(
 
   const bestMb = (best.length / (1024 * 1024)).toFixed(1);
   throw new FacebookMediaCompressionError(
-    `Could not compress media below Facebook's 4MB limit (best result: ${bestMb}MB). Try a shorter video or smaller image.`
+    `Could not compress media below Facebook's 10MB limit (best result: ${bestMb}MB). Try a shorter video or smaller image.`
   );
 }
 
@@ -286,7 +286,7 @@ export async function compressVideoForFacebook(
 
     const bestMb = (bestSize / (1024 * 1024)).toFixed(1);
     throw new FacebookMediaCompressionError(
-      `Could not compress media below Facebook's 4MB limit (best result: ${bestMb}MB). Try a shorter video or smaller image.`
+      `Could not compress media below Facebook's 10MB limit (best result: ${bestMb}MB). Try a shorter video or smaller image.`
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });
