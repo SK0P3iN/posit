@@ -56,6 +56,14 @@ const buildFolderChildren = (
     .filter((folder) => folder.parentId === parentId)
     .sort((a, b) => a.name.localeCompare(b.name));
 
+const formatFileSizeMb = (bytes: number) => {
+  if (!bytes) {
+    return null;
+  }
+
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+};
+
 const getFolderBreadcrumbs = (folders: MediaFolder[], folderId: string | null) => {
   if (!folderId) {
     return [];
@@ -716,6 +724,7 @@ export const MediaBox: FC<{
     const isAttachSelected = !!selected.find((item) => item.id === media.id);
     const isBulkSelected = bulkSelected.includes(media.id);
     const isTrashSelected = trashSelectedMedia.includes(media.id);
+    const fileSizeLabel = formatFileSizeMb(media.fileSize);
 
     return (
       <div
@@ -758,6 +767,11 @@ export const MediaBox: FC<{
               className="cursor-pointer hidden z-[100] group-hover:block absolute -top-[5px] -end-[5px]"
               onClick={deleteImage(media)}
             />
+          )}
+          {fileSizeLabel && (
+            <div className="absolute top-[10px] start-[10px] z-[100] text-[10px] font-[500] text-white px-[6px] py-[2px] rounded-[4px] bg-black/50">
+              {fileSizeLabel}
+            </div>
           )}
           <div className="absolute bottom-[10px] end-[10px] z-[100] text-[10px] truncate max-w-[80%]">
             {media.originalName || media.name}

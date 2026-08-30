@@ -21,7 +21,10 @@ import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { InstagramPreview } from '@gitroom/frontend/components/new-launch/providers/instagram/instagram.preview';
 import { MediaComponent } from '@gitroom/frontend/components/media/media.component';
 import { hasExtension } from '@gitroom/helpers/utils/has.extension';
-import { StorySlidePicker } from '@gitroom/frontend/components/new-launch/providers/story-slide-picker';
+import {
+  StoryCompanionNotice,
+  StorySlidePicker,
+} from '@gitroom/frontend/components/new-launch/providers/story-slide-picker';
 
 // Same warning glyph tiktok.provider.tsx uses for its inline restriction
 // notice - reused here so both providers' "heads up before you schedule"
@@ -268,15 +271,10 @@ const InstagramSettings: FC = () => {
             })}
             label={t(
               'instagram_also_share_to_story',
-              'Also share to Story'
+              'Also publish media as Story (no link sticker)'
             )}
           />
-          <div className="text-[12px] opacity-70 text-balance">
-            {t(
-              'instagram_also_share_to_story_description',
-              'This republishes the same media as a separate scheduled Story post - it is NOT Instagram’s native "share to Story" reshare sticker, which the API cannot produce. It creates an additional post that also counts toward your organization’s monthly post limit; if you’re at your plan’s limit, the Story companion will silently be skipped.'
-            )}
-          </div>
+          <StoryCompanionNotice />
           {watch('also_share_to_story') && (
             <StorySlidePicker
               media={media}

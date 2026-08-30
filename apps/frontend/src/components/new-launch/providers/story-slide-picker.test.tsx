@@ -1,6 +1,9 @@
 import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
-import { StorySlidePicker } from '@gitroom/frontend/components/new-launch/providers/story-slide-picker';
+import {
+  StoryCompanionNotice,
+  StorySlidePicker,
+} from '@gitroom/frontend/components/new-launch/providers/story-slide-picker';
 
 // U3 coverage: default selection, click-to-select, and the KTD8
 // Facebook-only divergence notice. Toggle-off/on persistence (KD8) is
@@ -83,5 +86,15 @@ describe('StorySlidePicker (U3)', () => {
       />
     );
     screen.getByText(/will only actually publish the first slide/i);
+  });
+});
+
+describe('StoryCompanionNotice', () => {
+  it('renders the plain-story limitation and quota copy', () => {
+    render(<StoryCompanionNotice />);
+    screen.getByText(/plain Story/i);
+    screen.getByText(/You get: the same image or video/i);
+    screen.getByText(/You do not get: caption, link sticker/i);
+    screen.getByText(/counts toward your monthly post limit/i);
   });
 });

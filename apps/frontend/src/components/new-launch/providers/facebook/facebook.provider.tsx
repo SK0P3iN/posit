@@ -17,7 +17,10 @@ import { FacebookPreview } from '@gitroom/frontend/components/new-launch/provide
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useEffect } from 'react';
 import { Checkbox } from '@gitroom/react/form/checkbox';
-import { StorySlidePicker } from '@gitroom/frontend/components/new-launch/providers/story-slide-picker';
+import {
+  StoryCompanionNotice,
+  StorySlidePicker,
+} from '@gitroom/frontend/components/new-launch/providers/story-slide-picker';
 import { hasExtension } from '@gitroom/helpers/utils/has.extension';
 
 const postType = [
@@ -104,14 +107,12 @@ export const FacebookSettings = () => {
         <div className="mt-[8px] flex flex-col gap-[6px]">
           <Checkbox
             {...register('also_share_to_story', { value: false })}
-            label={t('facebook_also_share_to_story', 'Also share to Story')}
-          />
-          <div className="text-[12px] opacity-70 text-balance">
-            {t(
-              'facebook_also_share_to_story_description',
-              'This republishes the same media as a separate scheduled Story post. It creates an additional post that also counts toward your organization’s monthly post limit; if you’re at your plan’s limit, the Story companion will silently be skipped.'
+            label={t(
+              'facebook_also_share_to_story',
+              'Also publish media as Story (no link sticker)'
             )}
-          </div>
+          />
+          <StoryCompanionNotice />
           {alsoShareToStory && (
             <StorySlidePicker
               media={media}
