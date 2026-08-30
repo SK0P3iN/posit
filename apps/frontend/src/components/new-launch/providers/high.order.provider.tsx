@@ -72,6 +72,10 @@ export const getOversizedMedia = (
   return messages;
 };
 
+export const hasAttachedMedia = (
+  entries: Array<{ media?: Array<{ path: string }> }>
+): boolean => entries.some((e) => (e.media?.length ?? 0) > 0);
+
 export const withProvider = function <T extends object>(params: {
   comments?: boolean | 'no-media';
   postComment: PostComment;
@@ -88,6 +92,7 @@ export const withProvider = function <T extends object>(params: {
     image?: { maxSizeBytes: number };
     video?: { maxSizeBytes: number };
   };
+  mediaCompressionNote?: string;
 }) {
   const {
     postComment,
@@ -96,6 +101,7 @@ export const withProvider = function <T extends object>(params: {
     dto,
     maximumCharacters,
     mediaLimits,
+    mediaCompressionNote,
   } = params;
 
   const Wrapped = forwardRef((props: { id: string }, ref) => {
@@ -289,6 +295,13 @@ export const withProvider = function <T extends object>(params: {
               !current && 'hidden'
             )}
           >
+            {current &&
+              mediaCompressionNote &&
+              hasAttachedMedia(value) && (
+                <div className="bg-blue-500/10 border border-blue-500 text-blue-400 p-[10px] mb-[18px] rounded-[10px] text-[13px] text-balance">
+                  {mediaCompressionNote}
+                </div>
+              )}
             {current &&
               oversizedMedia.map((message, index) => (
                 <div
