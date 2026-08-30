@@ -147,37 +147,63 @@ describe('FacebookProvider', () => {
     });
   });
 
-  describe('FacebookProvider - proactive 4MB photo limit (turns Graph API error 1366046 proactive)', () => {
-    it('flags a photo over 4MB before it ever reaches the Graph API', async () => {
-      jest.spyOn(provider as any, 'mediaSize').mockResolvedValue(5 * 1024 * 1024);
-
-      const result = await provider.checkMediaLimits([
-        [{ path: 'https://cdn/img.png' }],
-      ]);
-      expect(result).toBe(
-        'Photo exceeds the facebook limit of 4.0MB (currently 5.0MB)'
-      );
-    });
-
-    it('allows a photo within the 4MB limit', async () => {
-      jest.spyOn(provider as any, 'mediaSize').mockResolvedValue(1 * 1024 * 1024);
-
-      const result = await provider.checkMediaLimits([
-        [{ path: 'https://cdn/img.png' }],
-      ]);
-      expect(result).toBe(true);
-    });
-
-    it('does not apply the photo limit to a video', async () => {
+  describe('FacebookProvider - media limits', () => {
+    it('defers media size handling until post-time compression', async () => {
       const mediaSizeSpy = jest
         .spyOn(provider as any, 'mediaSize')
         .mockResolvedValue(50 * 1024 * 1024);
 
       const result = await provider.checkMediaLimits([
-        [{ path: 'https://cdn/clip.mp4' }],
+        [
+          { path: 'https://cdn/img.png' },
+          { path: 'https://cdn/clip.mp4' },
+        ],
       ]);
+
       expect(result).toBe(true);
       expect(mediaSizeSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('FacebookProvider - media compression at post time', () => {
+    it('prepareMediaForFacebook compresses an oversized image before upload', async () => {
+      const compressSpy = jest
+        .spyOn(require('./facebook.media'), 'compressImageForFacebook')
+        .mockResolvedValue({
+          buffer: Buffer.alloc(1024),
+          mime: 'image/jpeg',
+        });
+
+      const result = await (provider as any).prepareMediaForFacebook(
+        'https://cdn/big.jpg'
+      );
+
+      expect(result.kind).toBe('photo');
+      expect(result.buffer).toBeDefined();
+      compressSpy.mockRestore();
+    });
+
+    it('uploadPhotoBuffer sends the compressed photo as multipart bytes', async () => {
+      const fetchSpy = jest
+        .spyOn(provider as any, 'fetch')
+        .mockResolvedValue({
+          json: async () => ({ id: 'photo-1' }),
+        } as Response);
+
+      await (provider as any).uploadPhotoBuffer(
+        'page-1',
+        'token-1',
+        Buffer.from('compressed-image'),
+        'image/jpeg',
+        false,
+        'upload photo'
+      );
+
+      const options = fetchSpy.mock.calls[0][1];
+      expect(Buffer.isBuffer(options.body)).toBe(true);
+      expect(options.headers['content-type']).toContain(
+        'multipart/form-data; boundary='
+      );
     });
   });
 

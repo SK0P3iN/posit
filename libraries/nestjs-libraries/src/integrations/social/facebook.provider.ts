@@ -25,6 +25,13 @@ import { Integration } from '@prisma/client';
 import { hasExtension } from '@gitroom/helpers/utils/has.extension';
 import { timer } from '@gitroom/helpers/utils/timer';
 import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
+import FormData from 'form-data';
+import { UploadFactory } from '@gitroom/nestjs-libraries/upload/upload.factory';
+import {
+  compressImageForFacebook,
+  compressVideoForFacebook,
+  FacebookMediaCompressionError,
+} from '@gitroom/nestjs-libraries/integrations/social/facebook.media';
 
 @Rules(
   "Facebook posts can be text only, or include photos or a video. If it's a story, it must have at least one attachment (photo or video), and each media is published as a separate story."
@@ -50,12 +57,11 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
   }
   dto = FacebookDto;
 
-  // Graph API rejects photos over 4MB with error code 1366046 (see
-  // handleErrors below) — this makes that check proactive instead of
-  // discovering it only after the post attempt.
-  override mediaLimits = {
-    image: { maxSizeBytes: 4 * 1024 * 1024 },
-  };
+  override async checkMediaLimits(
+    _posts: Array<ValidityMedia[]>
+  ): Promise<string | true> {
+    return true;
+  }
 
   override async checkValidity(
     [firstPost]: Array<ValidityMedia[]>,
@@ -511,6 +517,57 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
     return videoStatus === 'upload_complete' || videoStatus === 'ready';
   }
 
+  private async prepareMediaForFacebook(path: string): Promise<
+    | { kind: 'photo'; buffer: Buffer; mime: 'image/jpeg' | 'image/png' }
+    | { kind: 'video'; url: string }
+  > {
+    try {
+      if (hasExtension(path, 'mp4')) {
+        const storage = UploadFactory.createStorage();
+        const url = await compressVideoForFacebook(path, (file) =>
+          storage.uploadFile(file)
+        );
+        return { kind: 'video', url };
+      }
+
+      const { buffer, mime } = await compressImageForFacebook(path);
+      return { kind: 'photo', buffer, mime };
+    } catch (err) {
+      if (err instanceof FacebookMediaCompressionError) {
+        throw new BadBody(this.identifier, '{}', '{}', err.message);
+      }
+      throw err;
+    }
+  }
+
+  private async uploadPhotoBuffer(
+    pageId: string,
+    accessToken: string,
+    buffer: Buffer,
+    mime: string,
+    published: boolean,
+    label: string
+  ): Promise<{ id: string }> {
+    const form = new FormData();
+    form.append('source', buffer, {
+      filename: mime === 'image/png' ? 'photo.png' : 'photo.jpg',
+      contentType: mime,
+    });
+    form.append('published', published ? 'true' : 'false');
+    form.append('access_token', accessToken);
+
+    const response = await this.fetch(
+      `https://graph.facebook.com/v20.0/${pageId}/photos`,
+      {
+        method: 'POST',
+        headers: form.getHeaders(),
+        body: form.getBuffer(),
+      },
+      label
+    );
+    return response.json();
+  }
+
   async postPending(
     id: string,
     accessToken: string,
@@ -526,7 +583,8 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
       // can never re-publish the stories that already went out.
       const items = [];
       for (const media of firstPost?.media || []) {
-        if (hasExtension(media.path, 'mp4')) {
+        const prepared = await this.prepareMediaForFacebook(media.path);
+        if (prepared.kind === 'video') {
           const { video_id, upload_url } = await (
             await this.fetch(
               `https://graph.facebook.com/v20.0/${id}/video_stories?upload_phase=start&access_token=${accessToken}`,
@@ -543,7 +601,7 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
               method: 'POST',
               headers: {
                 Authorization: `OAuth ${accessToken}`,
-                file_url: media.path,
+                file_url: prepared.url,
               },
             },
             'upload video story'
@@ -551,22 +609,14 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
 
           items.push({ kind: 'video', mediaId: video_id });
         } else {
-          const { id: photoId } = await (
-            await this.fetch(
-              `https://graph.facebook.com/v20.0/${id}/photos?access_token=${accessToken}`,
-              {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                  url: media.path,
-                  published: false,
-                }),
-              },
-              'upload photo story'
-            )
-          ).json();
+          const { id: photoId } = await this.uploadPhotoBuffer(
+            id,
+            accessToken,
+            prepared.buffer,
+            prepared.mime,
+            false,
+            'upload photo story'
+          );
 
           items.push({ kind: 'photo', mediaId: photoId });
         }
@@ -829,6 +879,18 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
     let finalId = '';
     let finalUrl = '';
     if (hasExtension(firstPost?.media?.[0]?.path, 'mp4')) {
+      const prepared = await this.prepareMediaForFacebook(
+        firstPost.media[0].path
+      );
+      if (prepared.kind !== 'video') {
+        throw new BadBody(
+          this.identifier,
+          '{}',
+          '{}',
+          'Invalid Facebook video'
+        );
+      }
+
       const {
         id: videoId,
         permalink_url,
@@ -842,7 +904,7 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-              file_url: firstPost?.media?.[0]?.path!,
+              file_url: prepared.url,
               description: firstPost.message,
               published: true,
             }),
@@ -858,22 +920,23 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
         ? []
         : await Promise.all(
             firstPost.media.map(async (media) => {
-              const { id: photoId } = await (
-                await this.fetch(
-                  `https://graph.facebook.com/v20.0/${id}/photos?access_token=${accessToken}`,
-                  {
-                    method: 'POST',
-                    headers: {
-                      'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                      url: media.path,
-                      published: false,
-                    }),
-                  },
-                  'upload images slides'
-                )
-              ).json();
+              const prepared = await this.prepareMediaForFacebook(media.path);
+              if (prepared.kind !== 'photo') {
+                throw new BadBody(
+                  this.identifier,
+                  '{}',
+                  '{}',
+                  'Facebook carousels only support photos'
+                );
+              }
+              const { id: photoId } = await this.uploadPhotoBuffer(
+                id,
+                accessToken,
+                prepared.buffer,
+                prepared.mime,
+                false,
+                'upload images slides'
+              );
 
               return { media_fbid: photoId };
             })
