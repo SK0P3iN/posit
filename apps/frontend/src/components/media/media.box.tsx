@@ -29,6 +29,7 @@ import { ThirdPartyMediaLibrary } from '@gitroom/frontend/components/third-parti
 import { useUppyUploader } from '@gitroom/frontend/components/media/new.uploader';
 import { Pagination } from '@gitroom/frontend/components/media/media.pagination';
 import {
+  ChevronLeftIcon,
   ChevronRightIcon,
   DeleteCircleIcon,
   NoMediaIcon,
@@ -1101,7 +1102,11 @@ export const MediaBox: FC<{
                 isTrashView ? 'bg-[#612BD3] text-white' : 'bg-newColColor'
               )}
             >
-              <TrashIcon size={14} />
+              {isTrashView ? (
+                <ChevronLeftIcon size={14} />
+              ) : (
+                <TrashIcon size={14} />
+              )}
               {isTrashView
                 ? t('back_to_library', 'Back to library')
                 : t('recently_deleted', 'Recently deleted')}
