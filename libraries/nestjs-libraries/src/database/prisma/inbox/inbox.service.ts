@@ -12,14 +12,47 @@ import { IntegrationManager } from '@gitroom/nestjs-libraries/integrations/integ
 import { IntegrationService } from '@gitroom/nestjs-libraries/database/prisma/integrations/integration.service';
 import { ioRedis } from '@gitroom/nestjs-libraries/redis/redis.service';
 import { RefreshToken } from '@gitroom/nestjs-libraries/integrations/social.abstract';
+import { RefreshIntegrationService } from '@gitroom/nestjs-libraries/integrations/refresh.integration.service';
 
 @Injectable()
 export class InboxService {
   constructor(
     private _inboxRepository: InboxRepository,
     private _integrationManager: IntegrationManager,
-    private _integrationService: IntegrationService
+    private _integrationService: IntegrationService,
+    private _refreshIntegrationService: RefreshIntegrationService
   ) {}
+
+  // Access tokens naturally expire between the daily refresh cron runs; a
+  // 401 (RefreshToken) is expected here and should be healed with the
+  // stored refresh token before we give up on the channel, the same way
+  // IntegrationService.checkAnalytics already does for the Analytics tab.
+  private async withTokenRefresh<T>(
+    integration: Integration,
+    action: (integration: Integration) => Promise<T>,
+    reconnectMessage: string
+  ): Promise<T> {
+    try {
+      return await action(integration);
+    } catch (err) {
+      if (!(err instanceof RefreshToken)) {
+        throw err;
+      }
+
+      const refreshed = await this._refreshIntegrationService.refresh(
+        integration
+      );
+      if (!refreshed || !refreshed.accessToken) {
+        throw new BadRequestException(reconnectMessage);
+      }
+
+      try {
+        return await action({ ...integration, token: refreshed.accessToken });
+      } catch {
+        throw new BadRequestException(reconnectMessage);
+      }
+    }
+  }
 
   list(
     orgId: string,
@@ -125,22 +158,19 @@ export class InboxService {
   async syncOrganization(orgId: string) {
     const integrations = (
       await this._integrationService.getIntegrationsList(orgId)
-    ).filter((i) => !i.disabled && !i.deletedAt && !i.refreshNeeded);
+    ).filter((i) => !i.disabled && !i.deletedAt);
 
     let upserted = 0;
     const errors: string[] = [];
 
     for (const integration of integrations) {
       try {
-        upserted += await this.syncIntegration(integration);
+        upserted += await this.withTokenRefresh(
+          integration,
+          (i) => this.syncIntegration(i),
+          'reconnect required'
+        );
       } catch (err) {
-        if (err instanceof RefreshToken) {
-          await this._integrationService.disconnectChannel(orgId, integration);
-          errors.push(
-            `${integration.name}: reconnect required (${err.message || 'token'})`
-          );
-          continue;
-        }
         errors.push(
           `${integration.name}: ${
             err instanceof Error ? err.message : 'sync failed'
@@ -207,7 +237,7 @@ export class InboxService {
       throw new BadRequestException('This inbox item cannot be replied to');
     }
 
-    if (item.integration.refreshNeeded || item.integration.disabled) {
+    if (item.integration.disabled) {
       throw new BadRequestException(
         'Reconnect the channel before replying to inbox items'
       );
@@ -230,33 +260,25 @@ export class InboxService {
       );
     }
 
-    try {
-      const result = await provider.replyToInboxItem(
-        fullIntegration.token,
-        {
-          type: item.type,
-          remoteId: item.remoteId,
-          threadKey: item.threadKey,
-          authorId: item.authorId,
-        },
-        trimmed,
-        fullIntegration
-      );
+    const result = await this.withTokenRefresh(
+      fullIntegration,
+      (i) =>
+        provider.replyToInboxItem(
+          i.token,
+          {
+            type: item.type,
+            remoteId: item.remoteId,
+            threadKey: item.threadKey,
+            authorId: item.authorId,
+          },
+          trimmed,
+          i
+        ),
+      'Reconnect the channel before replying to inbox items'
+    );
 
-      await this._inboxRepository.markRead(orgId, id);
-      return { id, replyRemoteId: result?.remoteId || null };
-    } catch (err) {
-      if (err instanceof RefreshToken) {
-        await this._integrationService.disconnectChannel(
-          orgId,
-          fullIntegration
-        );
-        throw new BadRequestException(
-          'Reconnect the channel before replying to inbox items'
-        );
-      }
-      throw err;
-    }
+    await this._inboxRepository.markRead(orgId, id);
+    return { id, replyRemoteId: result?.remoteId || null };
   }
 
   async getThread(orgId: string, integrationId: string, postRemoteId: string) {
@@ -267,7 +289,7 @@ export class InboxService {
     if (!integration) {
       throw new NotFoundException('Channel not found');
     }
-    if (integration.refreshNeeded || integration.disabled) {
+    if (integration.disabled) {
       throw new BadRequestException(
         'Reconnect the channel before viewing inbox threads'
       );
@@ -282,21 +304,11 @@ export class InboxService {
       );
     }
 
-    try {
-      return await provider.fetchInboxThread(
-        integration.token,
-        postRemoteId,
-        integration
-      );
-    } catch (err) {
-      if (err instanceof RefreshToken) {
-        await this._integrationService.disconnectChannel(orgId, integration);
-        throw new BadRequestException(
-          'Reconnect the channel before viewing inbox threads'
-        );
-      }
-      throw err;
-    }
+    return this.withTokenRefresh(
+      integration,
+      (i) => provider.fetchInboxThread(i.token, postRemoteId, i),
+      'Reconnect the channel before viewing inbox threads'
+    );
   }
 
   async likeComment(
@@ -312,7 +324,7 @@ export class InboxService {
     if (!integration) {
       throw new NotFoundException('Channel not found');
     }
-    if (integration.refreshNeeded || integration.disabled) {
+    if (integration.disabled) {
       throw new BadRequestException(
         'Reconnect the channel before liking inbox comments'
       );
@@ -327,22 +339,11 @@ export class InboxService {
       );
     }
 
-    try {
-      return await provider.likeInboxComment(
-        integration.token,
-        commentRemoteId,
-        liked,
-        integration
-      );
-    } catch (err) {
-      if (err instanceof RefreshToken) {
-        await this._integrationService.disconnectChannel(orgId, integration);
-        throw new BadRequestException(
-          'Reconnect the channel before liking inbox comments'
-        );
-      }
-      throw err;
-    }
+    return this.withTokenRefresh(
+      integration,
+      (i) => provider.likeInboxComment(i.token, commentRemoteId, liked, i),
+      'Reconnect the channel before liking inbox comments'
+    );
   }
 
   async replyToComment(
@@ -363,7 +364,7 @@ export class InboxService {
     if (!integration) {
       throw new NotFoundException('Channel not found');
     }
-    if (integration.refreshNeeded || integration.disabled) {
+    if (integration.disabled) {
       throw new BadRequestException(
         'Reconnect the channel before replying to inbox items'
       );
@@ -378,22 +379,17 @@ export class InboxService {
       );
     }
 
-    try {
-      const result = await provider.replyToInboxItem(
-        integration.token,
-        { type: 'COMMENT', remoteId: commentRemoteId },
-        trimmed,
-        integration
-      );
-      return { replyRemoteId: result?.remoteId || null };
-    } catch (err) {
-      if (err instanceof RefreshToken) {
-        await this._integrationService.disconnectChannel(orgId, integration);
-        throw new BadRequestException(
-          'Reconnect the channel before replying to inbox items'
-        );
-      }
-      throw err;
-    }
+    const result = await this.withTokenRefresh(
+      integration,
+      (i) =>
+        provider.replyToInboxItem(
+          i.token,
+          { type: 'COMMENT', remoteId: commentRemoteId },
+          trimmed,
+          i
+        ),
+      'Reconnect the channel before replying to inbox items'
+    );
+    return { replyRemoteId: result?.remoteId || null };
   }
 }

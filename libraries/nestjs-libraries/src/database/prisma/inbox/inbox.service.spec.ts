@@ -23,10 +23,12 @@ jest.mock(
 );
 
 import { InboxService } from './inbox.service';
+import { RefreshToken } from '@gitroom/nestjs-libraries/integrations/social.abstract';
 
 function makeInboxService(overrides?: {
   integrationManager?: Partial<Record<string, jest.Mock>>;
   integrationService?: Partial<Record<string, jest.Mock>>;
+  refreshIntegrationService?: Partial<Record<string, jest.Mock>>;
 }) {
   const inboxRepository = {} as any;
   const integrationManager = {
@@ -37,14 +39,25 @@ function makeInboxService(overrides?: {
     getIntegrationsList: jest.fn(),
     ...overrides?.integrationService,
   };
+  const refreshIntegrationService = {
+    refresh: jest.fn(),
+    ...overrides?.refreshIntegrationService,
+  };
 
   const service = new InboxService(
     inboxRepository,
     integrationManager as any,
-    integrationService as any
+    integrationService as any,
+    refreshIntegrationService as any
   );
 
-  return { service, inboxRepository, integrationManager, integrationService };
+  return {
+    service,
+    inboxRepository,
+    integrationManager,
+    integrationService,
+    refreshIntegrationService,
+  };
 }
 
 describe('InboxService - embeddable inbox capability (U2, R1/R2/R3)', () => {
@@ -451,6 +464,222 @@ describe('InboxService - comment thread, like, and remote-id reply', () => {
         'hello',
         integration
       );
+    });
+  });
+});
+
+describe('InboxService - self-heals an expired access token instead of disconnecting', () => {
+  // Root cause: a 401 from the provider (RefreshToken) is the normal signal
+  // that the access token expired and should be renewed from the stored
+  // refresh token - exactly what IntegrationService.checkAnalytics already
+  // does for the Analytics tab. InboxService used to treat that same signal
+  // as "give up and mark the channel disconnected", which is why reacting to
+  // comments (and every other inbox action) stayed broken until the user
+  // visited Analytics and healed the token there instead.
+  describe('likeComment', () => {
+    it('retries with a refreshed token after a 401 instead of disconnecting the channel', async () => {
+      const integration = {
+        id: 'integration-1',
+        token: 'expired-token',
+        refreshNeeded: false,
+        disabled: false,
+        providerIdentifier: 'facebook',
+      };
+      const likeInboxComment = jest
+        .fn()
+        .mockRejectedValueOnce(new RefreshToken('integration-1', '{}', '{}'))
+        .mockResolvedValueOnce({ liked: true, likeCount: 5 });
+      const { service, refreshIntegrationService } = makeInboxService({
+        integrationService: {
+          getIntegrationById: jest.fn().mockResolvedValue(integration),
+        },
+        integrationManager: {
+          getSocialIntegration: jest.fn().mockReturnValue({
+            inboxCapabilities: () => ({
+              comments: true,
+              mentions: false,
+              dms: false,
+              embeddable: true,
+              likes: true,
+            }),
+            likeInboxComment,
+          }),
+        },
+        refreshIntegrationService: {
+          refresh: jest
+            .fn()
+            .mockResolvedValue({ accessToken: 'fresh-token', expiresIn: 3600 }),
+        },
+      });
+
+      const result = await service.likeComment(
+        'org-1',
+        'integration-1',
+        'comment-1',
+        true
+      );
+
+      expect(result).toEqual({ liked: true, likeCount: 5 });
+      expect(refreshIntegrationService.refresh).toHaveBeenCalledWith(integration);
+      expect(likeInboxComment).toHaveBeenNthCalledWith(
+        1,
+        'expired-token',
+        'comment-1',
+        true,
+        integration
+      );
+      expect(likeInboxComment).toHaveBeenNthCalledWith(
+        2,
+        'fresh-token',
+        'comment-1',
+        true,
+        { ...integration, token: 'fresh-token' }
+      );
+    });
+
+    it('still attempts the action for a channel already flagged refreshNeeded, instead of blocking it upfront', async () => {
+      const integration = {
+        id: 'integration-1',
+        token: 'stale-flag-but-still-valid-token',
+        refreshNeeded: true,
+        disabled: false,
+        providerIdentifier: 'facebook',
+      };
+      const likeInboxComment = jest
+        .fn()
+        .mockResolvedValue({ liked: true, likeCount: 1 });
+      const { service } = makeInboxService({
+        integrationService: {
+          getIntegrationById: jest.fn().mockResolvedValue(integration),
+        },
+        integrationManager: {
+          getSocialIntegration: jest.fn().mockReturnValue({
+            inboxCapabilities: () => ({
+              comments: true,
+              mentions: false,
+              dms: false,
+              embeddable: true,
+              likes: true,
+            }),
+            likeInboxComment,
+          }),
+        },
+      });
+
+      const result = await service.likeComment(
+        'org-1',
+        'integration-1',
+        'comment-1',
+        true
+      );
+
+      expect(result).toEqual({ liked: true, likeCount: 1 });
+      expect(likeInboxComment).toHaveBeenCalledWith(
+        'stale-flag-but-still-valid-token',
+        'comment-1',
+        true,
+        integration
+      );
+    });
+
+    it('throws a reconnect error when the stored refresh token itself is no longer valid', async () => {
+      const integration = {
+        id: 'integration-1',
+        token: 'expired-token',
+        refreshNeeded: false,
+        disabled: false,
+        providerIdentifier: 'facebook',
+      };
+      const likeInboxComment = jest
+        .fn()
+        .mockRejectedValue(new RefreshToken('integration-1', '{}', '{}'));
+      const { service, refreshIntegrationService } = makeInboxService({
+        integrationService: {
+          getIntegrationById: jest.fn().mockResolvedValue(integration),
+        },
+        integrationManager: {
+          getSocialIntegration: jest.fn().mockReturnValue({
+            inboxCapabilities: () => ({
+              comments: true,
+              mentions: false,
+              dms: false,
+              embeddable: true,
+              likes: true,
+            }),
+            likeInboxComment,
+          }),
+        },
+        refreshIntegrationService: {
+          refresh: jest.fn().mockResolvedValue(false),
+        },
+      });
+
+      await expect(
+        service.likeComment('org-1', 'integration-1', 'comment-1', true)
+      ).rejects.toThrow('Reconnect the channel before liking inbox comments');
+      expect(refreshIntegrationService.refresh).toHaveBeenCalledWith(integration);
+    });
+  });
+
+  describe('syncOrganization', () => {
+    it('reports a single, non-duplicated reconnect message when the refresh token is no longer valid', async () => {
+      const integration = {
+        id: 'integration-1',
+        name: 'My Instagram',
+        token: 'expired-token',
+        refreshNeeded: false,
+        disabled: false,
+        deletedAt: null,
+        providerIdentifier: 'instagram',
+      };
+      const fetchInboxItems = jest
+        .fn()
+        .mockRejectedValue(new RefreshToken('integration-1', '{}', '{}'));
+      const { service, refreshIntegrationService } = makeInboxService({
+        integrationService: {
+          getIntegrationsList: jest.fn().mockResolvedValue([integration]),
+        },
+        integrationManager: {
+          getSocialIntegration: jest.fn().mockReturnValue({ fetchInboxItems }),
+        },
+        refreshIntegrationService: {
+          refresh: jest.fn().mockResolvedValue(false),
+        },
+      });
+
+      const result = await service.syncOrganization('org-1');
+
+      expect(result.errors).toEqual(['My Instagram: reconnect required']);
+      expect(refreshIntegrationService.refresh).toHaveBeenCalledWith(
+        integration
+      );
+    });
+
+    it('retries a channel that was already flagged refreshNeeded instead of skipping it forever', async () => {
+      const integration = {
+        id: 'integration-1',
+        name: 'My Instagram',
+        token: 'stale-flag-but-still-valid-token',
+        refreshNeeded: true,
+        disabled: false,
+        deletedAt: null,
+        providerIdentifier: 'instagram',
+      };
+      const fetchInboxItems = jest.fn().mockResolvedValue([]);
+      const { service, refreshIntegrationService } = makeInboxService({
+        integrationService: {
+          getIntegrationsList: jest.fn().mockResolvedValue([integration]),
+        },
+        integrationManager: {
+          getSocialIntegration: jest.fn().mockReturnValue({ fetchInboxItems }),
+        },
+      });
+
+      const result = await service.syncOrganization('org-1');
+
+      expect(result.errors).toEqual([]);
+      expect(fetchInboxItems).toHaveBeenCalledWith('stale-flag-but-still-valid-token', integration);
+      expect(refreshIntegrationService.refresh).not.toHaveBeenCalled();
     });
   });
 });
