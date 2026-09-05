@@ -243,6 +243,7 @@ model MediaFolder {
   name           String
   organizationId String
   parentId       String?
+  order          Int           @default(0)
   deletedAt      DateTime?
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt

@@ -59,17 +59,42 @@ export class MediaRepository {
         organizationId: org,
         deletedAt: trashed ? { not: null } : null,
       },
-      orderBy: {
-        name: 'asc',
-      },
+      orderBy: [{ order: 'asc' }, { name: 'asc' }],
       select: {
         id: true,
         name: true,
         parentId: true,
+        order: true,
         createdAt: true,
         deletedAt: true,
       },
     });
+  }
+
+  async reorderFolders(org: string, orders: { id: string; order: number }[]) {
+    const ids = orders.map((item) => item.id);
+    const existing = await this._mediaFolder.model.mediaFolder.findMany({
+      where: {
+        organizationId: org,
+        id: { in: ids },
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    const existingIds = new Set(existing.map((folder) => folder.id));
+
+    await Promise.all(
+      orders
+        .filter((item) => existingIds.has(item.id))
+        .map((item) =>
+          this._mediaFolder.model.mediaFolder.update({
+            where: { id: item.id },
+            data: { order: item.order },
+          })
+        )
+    );
+
+    return { updated: [...existingIds] };
   }
 
   async createFolder(org: string, body: CreateMediaFolderDto) {

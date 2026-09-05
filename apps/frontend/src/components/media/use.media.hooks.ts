@@ -8,6 +8,7 @@ export type MediaFolder = {
   id: string;
   name: string;
   parentId: string | null;
+  order: number;
   createdAt: string;
 };
 

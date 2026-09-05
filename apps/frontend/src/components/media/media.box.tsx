@@ -12,6 +12,8 @@ import React, {
 } from 'react';
 import clsx from 'clsx';
 import { Media } from '@prisma/client';
+import { useDrag, useDrop } from 'react-dnd';
+import { DNDProvider } from '@gitroom/frontend/components/launches/helpers/dnd.provider';
 import { useDebounce } from 'use-debounce';
 import { Dashboard } from '@uppy/react';
 import { useMediaDirectory } from '@gitroom/react/helpers/use.media.directory';
@@ -54,7 +56,9 @@ const buildFolderChildren = (
 ) =>
   folders
     .filter((folder) => folder.parentId === parentId)
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
+
+const DRAG_TYPE_MEDIA_FOLDER = 'media-folder';
 
 const formatFileSizeMb = (bytes: number) => {
   if (!bytes) {
@@ -125,6 +129,7 @@ const FolderTreeItem: FC<{
   onRename: (folder: MediaFolder) => void;
   onDelete?: (folder: MediaFolder) => void;
   allowDelete: boolean;
+  onReorder?: (draggedId: string, targetId: string) => void;
 }> = ({
   folder,
   folders,
@@ -134,8 +139,32 @@ const FolderTreeItem: FC<{
   onRename,
   onDelete,
   allowDelete,
+  onReorder,
 }) => {
   const children = buildFolderChildren(folders, folder.id);
+
+  const [, drag] = useDrag(
+    () => ({
+      type: DRAG_TYPE_MEDIA_FOLDER,
+      item: { id: folder.id },
+      canDrag: !!onReorder,
+    }),
+    [folder.id, onReorder]
+  );
+
+  const [{ isFolderOver }, drop] = useDrop(
+    () => ({
+      accept: DRAG_TYPE_MEDIA_FOLDER,
+      canDrop: (item: { id: string }) => !!onReorder && item.id !== folder.id,
+      drop: (item: { id: string }) => {
+        onReorder?.(item.id, folder.id);
+      },
+      collect: (monitor) => ({
+        isFolderOver: monitor.isOver() && monitor.canDrop(),
+      }),
+    }),
+    [folder.id, onReorder]
+  );
 
   return (
     <>
@@ -144,9 +173,12 @@ const FolderTreeItem: FC<{
           'group flex items-center gap-[6px] rounded-[6px] px-[8px] py-[6px] cursor-pointer text-[13px]',
           activeId === folder.id
             ? 'bg-[#612BD3]/20 text-white'
-            : 'hover:bg-newColColor text-textColor'
+            : 'hover:bg-newColColor text-textColor',
+          isFolderOver && 'ring-1 ring-[#612BD3]'
         )}
         style={{ paddingLeft: `${8 + depth * 14}px` }}
+        // @ts-ignore
+        ref={(node) => drag(drop(node))}
       >
         <button
           type="button"
@@ -189,6 +221,7 @@ const FolderTreeItem: FC<{
           onRename={onRename}
           onDelete={onDelete}
           allowDelete={allowDelete}
+          onReorder={onReorder}
         />
       ))}
     </>
@@ -353,7 +386,9 @@ export const MediaBox: FC<{
       count: number,
       consumers: any[],
       onConfirm: () => Promise<void>,
-      title?: string
+      title?: string,
+      description?: string,
+      confirmLabel?: string
     ) => {
       modals.openModal({
         title: t('confirm_delete', 'Confirm delete'),
@@ -363,6 +398,8 @@ export const MediaBox: FC<{
             count={count}
             consumers={consumers}
             title={title}
+            description={description}
+            confirmLabel={confirmLabel}
             onCancel={close}
             onConfirm={async () => {
               await onConfirm();
@@ -542,6 +579,57 @@ export const MediaBox: FC<{
       toaster.show(t('media_moved', 'Media moved'), 'success');
     },
     [bulkSelected, fetch, refreshAll, t, toaster]
+  );
+
+  const reorderFolder = useCallback(
+    async (draggedId: string, targetId: string) => {
+      const dragged = folders.find((folder: MediaFolder) => folder.id === draggedId);
+      const target = folders.find((folder: MediaFolder) => folder.id === targetId);
+      if (!dragged || !target || dragged.parentId !== target.parentId) {
+        return;
+      }
+
+      const siblings = buildFolderChildren(folders, dragged.parentId);
+      const fromIndex = siblings.findIndex((folder) => folder.id === draggedId);
+      const toIndex = siblings.findIndex((folder) => folder.id === targetId);
+      if (fromIndex === -1 || toIndex === -1 || fromIndex === toIndex) {
+        return;
+      }
+
+      const reordered = [...siblings];
+      const [moved] = reordered.splice(fromIndex, 1);
+      reordered.splice(toIndex, 0, moved);
+      const orders = reordered.map((folder, index) => ({
+        id: folder.id,
+        order: index,
+      }));
+      const orderById = new Map(orders.map((item) => [item.id, item.order]));
+      const previousFolders = folders;
+
+      await mutateFolders(
+        folders.map((folder: MediaFolder) =>
+          orderById.has(folder.id)
+            ? { ...folder, order: orderById.get(folder.id)! }
+            : folder
+        ),
+        { revalidate: false }
+      );
+
+      try {
+        await fetch('/media/folders/reorder', {
+          method: 'POST',
+          body: JSON.stringify({ orders }),
+        });
+        await mutateFolders();
+      } catch (err) {
+        await mutateFolders(previousFolders, { revalidate: false });
+        toaster.show(
+          t('folder_reorder_failed', 'Could not reorder folders'),
+          'warning'
+        );
+      }
+    },
+    [folders, mutateFolders, fetch, t, toaster]
   );
 
   const restoreTrash = useCallback(async () => {
@@ -808,6 +896,7 @@ export const MediaBox: FC<{
   };
 
   return (
+    <DNDProvider>
     <DropFiles disabled={loading} className="flex flex-col flex-1" onDrop={dragAndDrop}>
       <div className="flex flex-col flex-1 gap-[12px]">
         <div className="flex flex-wrap items-center gap-[8px]">
@@ -1067,6 +1156,7 @@ export const MediaBox: FC<{
                   onRename={renameFolder}
                   onDelete={standalone ? (folder) => deleteFolderWithWarning(folder.id) : undefined}
                   allowDelete={!!standalone}
+                  onReorder={standalone ? reorderFolder : undefined}
                 />
               ))}
             </div>
@@ -1223,5 +1313,6 @@ export const MediaBox: FC<{
         )}
       </div>
     </DropFiles>
+    </DNDProvider>
   );
 };

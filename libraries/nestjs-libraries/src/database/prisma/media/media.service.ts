@@ -103,6 +103,10 @@ export class MediaService {
     return this._mediaRepository.moveMedia(org, ids, folderId);
   }
 
+  reorderFolders(org: string, orders: { id: string; order: number }[]) {
+    return this._mediaRepository.reorderFolders(org, orders);
+  }
+
   async getMediaUsage(org: string, ids: string[]) {
     const media = await this._mediaRepository.getMediaByIds(org, ids);
     const foundIds = media.map((item) => item.id);

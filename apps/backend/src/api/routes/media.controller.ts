@@ -34,6 +34,7 @@ import {
   MediaIdsDto,
   RestoreMediaDto,
 } from '@gitroom/nestjs-libraries/dtos/media/bulk.media.dto';
+import { ReorderFoldersDto } from '@gitroom/nestjs-libraries/dtos/media/reorder.folders.dto';
 
 @ApiTags('Media')
 @Controller('/media')
@@ -69,6 +70,14 @@ export class MediaController {
     @Body() body: RenameMediaFolderDto
   ) {
     return this._mediaService.renameFolder(org.id, id, body.name);
+  }
+
+  @Post('/folders/reorder')
+  reorderFolders(
+    @GetOrgFromRequest() org: Organization,
+    @Body() body: ReorderFoldersDto
+  ) {
+    return this._mediaService.reorderFolders(org.id, body.orders);
   }
 
   @Delete('/folders/:id')
