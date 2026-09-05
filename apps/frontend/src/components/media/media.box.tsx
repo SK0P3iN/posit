@@ -59,6 +59,7 @@ const buildFolderChildren = (
     .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
 
 const DRAG_TYPE_MEDIA_FOLDER = 'media-folder';
+const DRAG_TYPE_MEDIA_TILE = 'media-tile';
 
 const formatFileSizeMb = (bytes: number) => {
   if (!bytes) {
@@ -130,6 +131,7 @@ const FolderTreeItem: FC<{
   onDelete?: (folder: MediaFolder) => void;
   allowDelete: boolean;
   onReorder?: (draggedId: string, targetId: string) => void;
+  onDropMedia?: (mediaIds: string[], folderId: string) => void;
 }> = ({
   folder,
   folders,
@@ -140,6 +142,7 @@ const FolderTreeItem: FC<{
   onDelete,
   allowDelete,
   onReorder,
+  onDropMedia,
 }) => {
   const children = buildFolderChildren(folders, folder.id);
 
@@ -154,16 +157,25 @@ const FolderTreeItem: FC<{
 
   const [{ isFolderOver }, drop] = useDrop(
     () => ({
-      accept: DRAG_TYPE_MEDIA_FOLDER,
-      canDrop: (item: { id: string }) => !!onReorder && item.id !== folder.id,
-      drop: (item: { id: string }) => {
-        onReorder?.(item.id, folder.id);
+      accept: [DRAG_TYPE_MEDIA_FOLDER, DRAG_TYPE_MEDIA_TILE],
+      canDrop: (item: { id: string }, monitor) => {
+        if (monitor.getItemType() === DRAG_TYPE_MEDIA_FOLDER) {
+          return !!onReorder && item.id !== folder.id;
+        }
+        return !!onDropMedia;
+      },
+      drop: (item: { id: string; ids?: string[] }, monitor) => {
+        if (monitor.getItemType() === DRAG_TYPE_MEDIA_FOLDER) {
+          onReorder?.(item.id, folder.id);
+          return;
+        }
+        onDropMedia?.(item.ids?.length ? item.ids : [item.id], folder.id);
       },
       collect: (monitor) => ({
         isFolderOver: monitor.isOver() && monitor.canDrop(),
       }),
     }),
-    [folder.id, onReorder]
+    [folder.id, onReorder, onDropMedia]
   );
 
   return (
@@ -222,9 +234,124 @@ const FolderTreeItem: FC<{
           onDelete={onDelete}
           allowDelete={allowDelete}
           onReorder={onReorder}
+          onDropMedia={onDropMedia}
         />
       ))}
     </>
+  );
+};
+
+const MediaTile: FC<{
+  media: Media;
+  isTrash?: boolean;
+  standalone?: boolean;
+  isAttachSelected: boolean;
+  isBulkSelected: boolean;
+  isTrashSelected: boolean;
+  attachIndex: number;
+  fileSizeLabel: string;
+  dragIds: string[];
+  canDrag: boolean;
+  mediaDirectory: ReturnType<typeof useMediaDirectory>;
+  onTileClick: () => void;
+  onDelete: (e: React.MouseEvent) => Promise<void> | void;
+  onMaximize: (e: React.MouseEvent) => Promise<void> | void;
+}> = ({
+  media,
+  isTrash,
+  standalone,
+  isAttachSelected,
+  isBulkSelected,
+  isTrashSelected,
+  attachIndex,
+  fileSizeLabel,
+  dragIds,
+  canDrag,
+  mediaDirectory,
+  onTileClick,
+  onDelete,
+  onMaximize,
+}) => {
+  const [, drag] = useDrag(
+    () => ({
+      type: DRAG_TYPE_MEDIA_TILE,
+      item: { id: media.id, ids: dragIds },
+      canDrag,
+    }),
+    [media.id, dragIds, canDrag]
+  );
+
+  return (
+    <div
+      className={clsx(
+        'group px-[3px] py-[3px] float-left rounded-[6px] w8-max aspect-square',
+        !standalone && !isTrash && 'cursor-pointer'
+      )}
+      key={media.id}
+      // @ts-ignore
+      ref={canDrag ? drag : undefined}
+    >
+      <div
+        className={clsx(
+          'w-full h-full rounded-[6px] border-[4px] relative',
+          isAttachSelected || isBulkSelected || isTrashSelected
+            ? 'border-[#612BD3]'
+            : 'border-transparent'
+        )}
+        onClick={onTileClick}
+      >
+        {!isTrash && !standalone && isAttachSelected && (
+          <div className="text-white flex z-[101] justify-center items-center text-[14px] font-[500] w-[24px] h-[24px] rounded-full bg-[#612BD3] absolute -bottom-[10px] -end-[10px]">
+            {attachIndex + 1}
+          </div>
+        )}
+        {!isTrash && standalone && isBulkSelected && (
+          <div className="text-white flex z-[101] justify-center items-center text-[12px] font-[600] w-[22px] h-[22px] rounded-full bg-[#612BD3] absolute -bottom-[8px] -end-[8px]">
+            ✓
+          </div>
+        )}
+        {!isTrash && standalone && !isBulkSelected && (
+          <DeleteCircleIcon
+            className="cursor-pointer hidden z-[100] group-hover:block absolute -top-[5px] -end-[5px]"
+            onClick={onDelete}
+          />
+        )}
+        {fileSizeLabel && (
+          <div className="absolute top-[10px] start-[10px] z-[100] text-[10px] font-[500] text-white px-[6px] py-[2px] rounded-[4px] bg-black/50">
+            {fileSizeLabel}
+          </div>
+        )}
+        <div className="absolute bottom-[10px] end-[10px] z-[100] text-[10px] truncate max-w-[80%]">
+          {media.originalName || media.name}
+        </div>
+        <div className="w-full h-full rounded-[6px] overflow-hidden relative">
+          <div className="absolute z-[20] left-[50%] top-[50%] -translate-x-[50%] -translate-y-[50%]">
+            <div
+              onClick={onMaximize}
+              className="cursor-pointer p-[4px] bg-black/40 hidden group-hover:block hover:scale-150 transition-all"
+            >
+              <svg width="30" height="30" viewBox="0 0 14 14" fill="none">
+                <path
+                  d="M2 9H0V14H5V12H2V9ZM0 5H2V2H5V0H0V5ZM12 12H9V14H14V9H12V12ZM9 0V2H12V5H14V0H9Z"
+                  fill="#F1F5F9"
+                />
+              </svg>
+            </div>
+          </div>
+          {hasExtension(media.path, 'mp4') ? (
+            <VideoFrame url={mediaDirectory.set(media.path)} />
+          ) : (
+            <img
+              width="100%"
+              height="100%"
+              className="w-full h-full object-cover"
+              src={mediaDirectory.set(media.path)}
+              alt="media"
+            />
+          )}
+        </div>
+      </div>
+    </div>
   );
 };
 
@@ -565,20 +692,26 @@ export const MediaBox: FC<{
     [fetch, mutateFolders, openFolderNameModal, t, toaster]
   );
 
-  const moveSelectedToFolder = useCallback(
-    async (folderId: string | null) => {
-      if (!bulkSelected.length) {
+  const moveMediaViaDrag = useCallback(
+    async (mediaIds: string[], folderId: string) => {
+      if (!mediaIds.length) {
         return;
       }
-      await fetch('/media/move', {
-        method: 'POST',
-        body: JSON.stringify({ ids: bulkSelected, folderId }),
-      });
-      setBulkSelected([]);
-      await refreshAll();
-      toaster.show(t('media_moved', 'Media moved'), 'success');
+      try {
+        await fetch('/media/move', {
+          method: 'POST',
+          body: JSON.stringify({ ids: mediaIds, folderId }),
+        });
+        setBulkSelected((current) =>
+          current.filter((id) => !mediaIds.includes(id))
+        );
+        await refreshAll();
+        toaster.show(t('media_moved', 'Media moved'), 'success');
+      } catch (err) {
+        toaster.show(t('media_move_failed', 'Could not move media'), 'warning');
+      }
     },
-    [bulkSelected, fetch, refreshAll, t, toaster]
+    [fetch, refreshAll, t, toaster]
   );
 
   const reorderFolder = useCallback(
@@ -813,85 +946,36 @@ export const MediaBox: FC<{
     const isBulkSelected = bulkSelected.includes(media.id);
     const isTrashSelected = trashSelectedMedia.includes(media.id);
     const fileSizeLabel = formatFileSizeMb(media.fileSize);
+    const canDrag = !!standalone && !isTrash;
+    const dragIds = isBulkSelected && bulkSelected.length > 1 ? bulkSelected : [media.id];
 
     return (
-      <div
-        className={clsx(
-          'group px-[3px] py-[3px] float-left rounded-[6px] w8-max aspect-square',
-          !standalone && !isTrash && 'cursor-pointer'
-        )}
+      <MediaTile
         key={media.id}
-      >
-        <div
-          className={clsx(
-            'w-full h-full rounded-[6px] border-[4px] relative',
-            isAttachSelected || isBulkSelected || isTrashSelected
-              ? 'border-[#612BD3]'
-              : 'border-transparent'
-          )}
-          onClick={
-            isTrash
-              ? () =>
-                  setTrashSelectedMedia((current) =>
-                    current.includes(media.id)
-                      ? current.filter((id) => id !== media.id)
-                      : [...current, media.id]
-                  )
-              : addRemoveSelected(media)
-          }
-        >
-          {!isTrash && !standalone && isAttachSelected && (
-            <div className="text-white flex z-[101] justify-center items-center text-[14px] font-[500] w-[24px] h-[24px] rounded-full bg-[#612BD3] absolute -bottom-[10px] -end-[10px]">
-              {selected.findIndex((item) => item.id === media.id) + 1}
-            </div>
-          )}
-          {!isTrash && standalone && isBulkSelected && (
-            <div className="text-white flex z-[101] justify-center items-center text-[12px] font-[600] w-[22px] h-[22px] rounded-full bg-[#612BD3] absolute -bottom-[8px] -end-[8px]">
-              ✓
-            </div>
-          )}
-          {!isTrash && standalone && !isBulkSelected && (
-            <DeleteCircleIcon
-              className="cursor-pointer hidden z-[100] group-hover:block absolute -top-[5px] -end-[5px]"
-              onClick={deleteImage(media)}
-            />
-          )}
-          {fileSizeLabel && (
-            <div className="absolute top-[10px] start-[10px] z-[100] text-[10px] font-[500] text-white px-[6px] py-[2px] rounded-[4px] bg-black/50">
-              {fileSizeLabel}
-            </div>
-          )}
-          <div className="absolute bottom-[10px] end-[10px] z-[100] text-[10px] truncate max-w-[80%]">
-            {media.originalName || media.name}
-          </div>
-          <div className="w-full h-full rounded-[6px] overflow-hidden relative">
-            <div className="absolute z-[20] left-[50%] top-[50%] -translate-x-[50%] -translate-y-[50%]">
-              <div
-                onClick={maximize(media)}
-                className="cursor-pointer p-[4px] bg-black/40 hidden group-hover:block hover:scale-150 transition-all"
-              >
-                <svg width="30" height="30" viewBox="0 0 14 14" fill="none">
-                  <path
-                    d="M2 9H0V14H5V12H2V9ZM0 5H2V2H5V0H0V5ZM12 12H9V14H14V9H12V12ZM9 0V2H12V5H14V0H9Z"
-                    fill="#F1F5F9"
-                  />
-                </svg>
-              </div>
-            </div>
-            {hasExtension(media.path, 'mp4') ? (
-              <VideoFrame url={mediaDirectory.set(media.path)} />
-            ) : (
-              <img
-                width="100%"
-                height="100%"
-                className="w-full h-full object-cover"
-                src={mediaDirectory.set(media.path)}
-                alt="media"
-              />
-            )}
-          </div>
-        </div>
-      </div>
+        media={media}
+        isTrash={isTrash}
+        standalone={standalone}
+        isAttachSelected={isAttachSelected}
+        isBulkSelected={isBulkSelected}
+        isTrashSelected={isTrashSelected}
+        attachIndex={selected.findIndex((item) => item.id === media.id)}
+        fileSizeLabel={fileSizeLabel}
+        dragIds={dragIds}
+        canDrag={canDrag}
+        mediaDirectory={mediaDirectory}
+        onTileClick={
+          isTrash
+            ? () =>
+                setTrashSelectedMedia((current) =>
+                  current.includes(media.id)
+                    ? current.filter((id) => id !== media.id)
+                    : [...current, media.id]
+                )
+            : addRemoveSelected(media)
+        }
+        onDelete={deleteImage(media)}
+        onMaximize={maximize(media)}
+      />
     );
   };
 
@@ -1070,27 +1154,6 @@ export const MediaBox: FC<{
             >
               {t('delete_selected', 'Delete selected')}
             </button>
-            <select
-              className="h-[34px] px-[10px] rounded-[8px] bg-newBgColorInner border border-newColColor text-[12px]"
-              defaultValue=""
-              onChange={(e) => {
-                const value = e.target.value;
-                if (value === '__unfiled__') {
-                  moveSelectedToFolder(null);
-                } else if (value) {
-                  moveSelectedToFolder(value);
-                }
-                e.currentTarget.value = '';
-              }}
-            >
-              <option value="">{t('move_to_folder', 'Move to folder…')}</option>
-              <option value="__unfiled__">{t('unfiled', 'Unfiled')}</option>
-              {folders.map((folder: MediaFolder) => (
-                <option key={folder.id} value={folder.id}>
-                  {folder.name}
-                </option>
-              ))}
-            </select>
             <button
               type="button"
               onClick={() => setBulkSelected([])}
@@ -1157,6 +1220,7 @@ export const MediaBox: FC<{
                   onDelete={standalone ? (folder) => deleteFolderWithWarning(folder.id) : undefined}
                   allowDelete={!!standalone}
                   onReorder={standalone ? reorderFolder : undefined}
+                  onDropMedia={standalone ? moveMediaViaDrag : undefined}
                 />
               ))}
             </div>
