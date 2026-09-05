@@ -61,22 +61,23 @@ export class MediaService {
         continue;
       }
 
-      const descendantIds =
-        await this._mediaRepository.getDescendantFolderIdsAnyDeletedAt(
-          org,
-          folderId
-        );
+      const descendantIds = await this._mediaRepository.getDescendantFolderIds(
+        org,
+        folderId,
+        true
+      );
       const media = await this._mediaRepository.getTrashedMediaIdsInFolders(
         org,
         descendantIds
       );
+      const newMediaIds = media
+        .map((item) => item.id)
+        .filter((id) => !purgedMediaIds.has(id));
 
-      for (const item of media) {
-        if (!purgedMediaIds.has(item.id)) {
-          await this.purgeMedia(org, item.id);
-          purgedMediaIds.add(item.id);
-        }
-      }
+      await Promise.all(
+        newMediaIds.map((id) => this.purgeMedia(org, id))
+      );
+      newMediaIds.forEach((id) => purgedMediaIds.add(id));
 
       for (const id of [...descendantIds].reverse()) {
         await this._mediaRepository.hardDeleteFolderRow(org, id);
@@ -84,16 +85,20 @@ export class MediaService {
       }
     }
 
-    for (const mediaId of mediaIds || []) {
-      if (purgedMediaIds.has(mediaId)) {
-        continue;
-      }
-      const media = await this._mediaRepository.getMediaById(mediaId);
-      if (!media || media.organizationId !== org || !media.deletedAt) {
-        continue;
-      }
-      await this.purgeMedia(org, mediaId);
-      purgedMediaIds.add(mediaId);
+    const requestedMediaIds = (mediaIds || []).filter(
+      (id) => !purgedMediaIds.has(id)
+    );
+    if (requestedMediaIds.length) {
+      const media = await this._mediaRepository.getMediaByIds(
+        org,
+        requestedMediaIds
+      );
+      const eligibleIds = media
+        .filter((item) => !!item.deletedAt)
+        .map((item) => item.id);
+
+      await Promise.all(eligibleIds.map((id) => this.purgeMedia(org, id)));
+      eligibleIds.forEach((id) => purgedMediaIds.add(id));
     }
 
     return {

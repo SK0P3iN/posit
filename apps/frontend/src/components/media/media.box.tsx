@@ -510,14 +510,16 @@ export const MediaBox: FC<{
   }, [data?.results, type]);
 
   const openDeleteConfirm = useCallback(
-    (
-      count: number,
-      consumers: any[],
-      onConfirm: () => Promise<void>,
-      title?: string,
-      description?: string,
-      confirmLabel?: string
-    ) => {
+    (options: {
+      count: number;
+      consumers: any[];
+      onConfirm: () => Promise<void>;
+      title?: string;
+      description?: string;
+      confirmLabel?: string;
+    }) => {
+      const { count, consumers, onConfirm, title, description, confirmLabel } =
+        options;
       modals.openModal({
         title: t('confirm_delete', 'Confirm delete'),
         askClose: true,
@@ -564,14 +566,18 @@ export const MediaBox: FC<{
       });
       const result = await response.json();
       if (result.requiresConfirm) {
-        openDeleteConfirm(result.count, result.consumers, async () => {
-          await fetch('/media/bulk', {
-            method: 'POST',
-            body: JSON.stringify({ ids, confirm: true }),
-          });
-          await afterDelete?.();
-          await refreshAll();
-          toaster.show(t('moved_to_trash', 'Moved to trash'), 'success');
+        openDeleteConfirm({
+          count: result.count,
+          consumers: result.consumers,
+          onConfirm: async () => {
+            await fetch('/media/bulk', {
+              method: 'POST',
+              body: JSON.stringify({ ids, confirm: true }),
+            });
+            await afterDelete?.();
+            await refreshAll();
+            toaster.show(t('moved_to_trash', 'Moved to trash'), 'success');
+          },
         });
         return;
       }
@@ -599,10 +605,10 @@ export const MediaBox: FC<{
       });
       const result = await response.json();
       if (result.requiresConfirm) {
-        openDeleteConfirm(
-          result.count,
-          result.consumers,
-          async () => {
+        openDeleteConfirm({
+          count: result.count,
+          consumers: result.consumers,
+          onConfirm: async () => {
             await fetch(`/media/folders/${folderId}?confirm=true`, {
               method: 'DELETE',
             });
@@ -612,8 +618,8 @@ export const MediaBox: FC<{
             await refreshAll();
             toaster.show(t('folder_moved_to_trash', 'Folder moved to trash'), 'success');
           },
-          t('delete_folder_in_use', 'Folder contains media still in use')
-        );
+          title: t('delete_folder_in_use', 'Folder contains media still in use'),
+        });
         return;
       }
       if (drillFolderId === folderId) {
@@ -790,10 +796,10 @@ export const MediaBox: FC<{
       return;
     }
 
-    openDeleteConfirm(
-      mediaCount + folderCount,
-      [],
-      async () => {
+    openDeleteConfirm({
+      count: mediaCount + folderCount,
+      consumers: [],
+      onConfirm: async () => {
         await fetch('/media/purge', {
           method: 'POST',
           body: JSON.stringify({
@@ -809,14 +815,14 @@ export const MediaBox: FC<{
           'success'
         );
       },
-      t('permanent_delete_title', 'Permanently delete?'),
-      t(
+      title: t('permanent_delete_title', 'Permanently delete?'),
+      description: t(
         'permanent_delete_description',
         '{{count}} item(s) will be permanently deleted and cannot be recovered.',
         { count: mediaCount + folderCount }
       ),
-      t('delete_permanently', 'Delete permanently')
-    );
+      confirmLabel: t('delete_permanently', 'Delete permanently'),
+    });
   }, [
     fetch,
     openDeleteConfirm,

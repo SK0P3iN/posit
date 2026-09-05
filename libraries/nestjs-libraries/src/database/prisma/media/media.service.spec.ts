@@ -85,7 +85,7 @@ describe('MediaService.purgeSelected', () => {
   const buildService = (repositoryOverrides: Record<string, any> = {}) => {
     const mediaRepository = {
       getFolderById: jest.fn(),
-      getDescendantFolderIdsAnyDeletedAt: jest.fn(),
+      getDescendantFolderIds: jest.fn(),
       getTrashedMediaIdsInFolders: jest.fn(),
       hardDeleteFolderRow: jest.fn(),
       getMediaById: jest.fn(),
@@ -111,7 +111,7 @@ describe('MediaService.purgeSelected', () => {
       getFolderById: jest
         .fn()
         .mockResolvedValue({ id: 'folder-root', deletedAt: new Date() }),
-      getDescendantFolderIdsAnyDeletedAt: jest
+      getDescendantFolderIds: jest
         .fn()
         .mockResolvedValue(['folder-root', 'folder-child']),
       getTrashedMediaIdsInFolders: jest
@@ -129,9 +129,10 @@ describe('MediaService.purgeSelected', () => {
 
     const result = await service.purgeSelected('org-1', undefined, ['folder-root']);
 
-    expect(mediaRepository.getDescendantFolderIdsAnyDeletedAt).toHaveBeenCalledWith(
+    expect(mediaRepository.getDescendantFolderIds).toHaveBeenCalledWith(
       'org-1',
-      'folder-root'
+      'folder-root',
+      true
     );
     // Folder rows must be deleted child-first: reversed BFS order.
     expect(mediaRepository.hardDeleteFolderRow.mock.calls.map((call) => call[1])).toEqual([
@@ -149,16 +150,16 @@ describe('MediaService.purgeSelected', () => {
 
     const result = await service.purgeSelected('org-1', undefined, ['folder-1']);
 
-    expect(mediaRepository.getDescendantFolderIdsAnyDeletedAt).not.toHaveBeenCalled();
+    expect(mediaRepository.getDescendantFolderIds).not.toHaveBeenCalled();
     expect(mediaRepository.hardDeleteFolderRow).not.toHaveBeenCalled();
     expect(result).toEqual({ mediaIds: [], folderIds: [] });
   });
 
   it('does not purge a standalone media item that is not trashed', async () => {
     const { service, mediaRepository } = buildService({
-      getMediaById: jest
+      getMediaByIds: jest
         .fn()
-        .mockResolvedValue({ id: 'media-1', organizationId: 'org-1', deletedAt: null }),
+        .mockResolvedValue([{ id: 'media-1', organizationId: 'org-1', deletedAt: null }]),
     });
 
     const result = await service.purgeSelected('org-1', ['media-1'], undefined);
@@ -167,16 +168,16 @@ describe('MediaService.purgeSelected', () => {
   });
 
   it('does not purge a media item belonging to a different organization', async () => {
-    const { service } = buildService({
-      getMediaById: jest.fn().mockResolvedValue({
-        id: 'media-1',
-        organizationId: 'org-other',
-        deletedAt: new Date(),
-      }),
+    const { mediaRepository, service } = buildService({
+      // getMediaByIds already scopes its WHERE clause to the requesting org,
+      // so a foreign-org id is simply absent from the result -- not merely
+      // present-but-flagged.
+      getMediaByIds: jest.fn().mockResolvedValue([]),
     });
 
     const result = await service.purgeSelected('org-1', ['media-1'], undefined);
 
+    expect(mediaRepository.getMediaByIds).toHaveBeenCalledWith('org-1', ['media-1']);
     expect(result).toEqual({ mediaIds: [], folderIds: [] });
   });
 });

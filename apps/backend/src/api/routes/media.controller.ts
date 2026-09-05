@@ -32,10 +32,10 @@ import { MoveMediaDto } from '@gitroom/nestjs-libraries/dtos/media/move.media.dt
 import {
   BulkDeleteMediaDto,
   MediaIdsDto,
+  PurgeMediaDto,
   RestoreMediaDto,
 } from '@gitroom/nestjs-libraries/dtos/media/bulk.media.dto';
 import { ReorderFoldersDto } from '@gitroom/nestjs-libraries/dtos/media/reorder.folders.dto';
-import { PurgeMediaDto } from '@gitroom/nestjs-libraries/dtos/media/purge.media.dto';
 
 @ApiTags('Media')
 @Controller('/media')

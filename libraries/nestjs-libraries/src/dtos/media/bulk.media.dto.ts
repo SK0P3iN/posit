@@ -30,6 +30,8 @@ export class RestoreMediaDto {
   folderIds?: string[];
 }
 
+export class PurgeMediaDto extends RestoreMediaDto {}
+
 export class DeleteFolderDto {
   @IsOptional()
   @IsBoolean()
