@@ -782,6 +782,50 @@ export const MediaBox: FC<{
     toaster.show(t('restored_from_trash', 'Restored from trash'), 'success');
   }, [fetch, refreshAll, t, toaster, trashSelectedFolders, trashSelectedMedia]);
 
+  const purgeTrashSelection = useCallback(() => {
+    const mediaCount = trashSelectedMedia.length;
+    const folderCount = trashSelectedFolders.length;
+    if (!mediaCount && !folderCount) {
+      return;
+    }
+
+    openDeleteConfirm(
+      mediaCount + folderCount,
+      [],
+      async () => {
+        await fetch('/media/purge', {
+          method: 'POST',
+          body: JSON.stringify({
+            mediaIds: mediaCount ? trashSelectedMedia : undefined,
+            folderIds: folderCount ? trashSelectedFolders : undefined,
+          }),
+        });
+        setTrashSelectedMedia([]);
+        setTrashSelectedFolders([]);
+        await refreshAll();
+        toaster.show(
+          t('permanently_deleted', 'Permanently deleted'),
+          'success'
+        );
+      },
+      t('permanent_delete_title', 'Permanently delete?'),
+      t(
+        'permanent_delete_description',
+        '{{count}} item(s) will be permanently deleted and cannot be recovered.',
+        { count: mediaCount + folderCount }
+      ),
+      t('delete_permanently', 'Delete permanently')
+    );
+  }, [
+    fetch,
+    openDeleteConfirm,
+    refreshAll,
+    t,
+    toaster,
+    trashSelectedFolders,
+    trashSelectedMedia,
+  ]);
+
   const toggleBulk = useCallback((mediaId: string) => {
     setBulkSelected((current) =>
       current.includes(mediaId)
@@ -1217,6 +1261,13 @@ export const MediaBox: FC<{
               className="h-[36px] px-[14px] rounded-[8px] bg-[#612BD3] text-white text-[13px] font-[600]"
             >
               {t('restore_selected', 'Restore selected')}
+            </button>
+            <button
+              type="button"
+              onClick={purgeTrashSelection}
+              className="h-[36px] px-[14px] rounded-[8px] bg-red-600 text-white text-[13px] font-[600]"
+            >
+              {t('delete_permanently', 'Delete permanently')}
             </button>
           </div>
         )}
