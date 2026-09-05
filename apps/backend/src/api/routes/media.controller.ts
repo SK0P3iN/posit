@@ -35,6 +35,7 @@ import {
   RestoreMediaDto,
 } from '@gitroom/nestjs-libraries/dtos/media/bulk.media.dto';
 import { ReorderFoldersDto } from '@gitroom/nestjs-libraries/dtos/media/reorder.folders.dto';
+import { PurgeMediaDto } from '@gitroom/nestjs-libraries/dtos/media/purge.media.dto';
 
 @ApiTags('Media')
 @Controller('/media')
@@ -135,6 +136,15 @@ export class MediaController {
     @Body() body: RestoreMediaDto
   ) {
     return this._mediaService.restore(org.id, body.mediaIds, body.folderIds);
+  }
+
+  @Post('/purge')
+  purge(@GetOrgFromRequest() org: Organization, @Body() body: PurgeMediaDto) {
+    return this._mediaService.purgeSelected(
+      org.id,
+      body.mediaIds,
+      body.folderIds
+    );
   }
 
   @Delete('/:id')

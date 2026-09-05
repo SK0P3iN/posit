@@ -43,6 +43,65 @@ export class MediaService {
     return this._mediaRepository.hardDeleteMedia(org, id);
   }
 
+  async purgeSelected(
+    org: string,
+    mediaIds?: string[],
+    folderIds?: string[]
+  ) {
+    const purgedMediaIds = new Set<string>();
+    const purgedFolderIds: string[] = [];
+
+    for (const folderId of folderIds || []) {
+      const folder = await this._mediaRepository.getFolderById(
+        org,
+        folderId,
+        true
+      );
+      if (!folder || !folder.deletedAt) {
+        continue;
+      }
+
+      const descendantIds =
+        await this._mediaRepository.getDescendantFolderIdsAnyDeletedAt(
+          org,
+          folderId
+        );
+      const media = await this._mediaRepository.getTrashedMediaIdsInFolders(
+        org,
+        descendantIds
+      );
+
+      for (const item of media) {
+        if (!purgedMediaIds.has(item.id)) {
+          await this.purgeMedia(org, item.id);
+          purgedMediaIds.add(item.id);
+        }
+      }
+
+      for (const id of [...descendantIds].reverse()) {
+        await this._mediaRepository.hardDeleteFolderRow(org, id);
+        purgedFolderIds.push(id);
+      }
+    }
+
+    for (const mediaId of mediaIds || []) {
+      if (purgedMediaIds.has(mediaId)) {
+        continue;
+      }
+      const media = await this._mediaRepository.getMediaById(mediaId);
+      if (!media || media.organizationId !== org || !media.deletedAt) {
+        continue;
+      }
+      await this.purgeMedia(org, mediaId);
+      purgedMediaIds.add(mediaId);
+    }
+
+    return {
+      mediaIds: [...purgedMediaIds],
+      folderIds: purgedFolderIds,
+    };
+  }
+
   private async removeMediaFromStorage(
     path: string,
     thumbnail?: string | null

@@ -202,6 +202,62 @@ export class MediaRepository {
     });
   }
 
+  async getDescendantFolderIdsAnyDeletedAt(org: string, rootId: string) {
+    const folders = await this._mediaFolder.model.mediaFolder.findMany({
+      where: {
+        organizationId: org,
+      },
+      select: {
+        id: true,
+        parentId: true,
+      },
+    });
+
+    const childrenMap = new Map<string, string[]>();
+    for (const folder of folders) {
+      if (!folder.parentId) {
+        continue;
+      }
+      const list = childrenMap.get(folder.parentId) || [];
+      list.push(folder.id);
+      childrenMap.set(folder.parentId, list);
+    }
+
+    const collected = new Set<string>([rootId]);
+    const queue = [rootId];
+    while (queue.length) {
+      const current = queue.shift()!;
+      for (const child of childrenMap.get(current) || []) {
+        if (!collected.has(child)) {
+          collected.add(child);
+          queue.push(child);
+        }
+      }
+    }
+
+    return [...collected];
+  }
+
+  getTrashedMediaIdsInFolders(org: string, folderIds: string[]) {
+    return this._media.model.media.findMany({
+      where: {
+        organizationId: org,
+        deletedAt: { not: null },
+        folderId: { in: folderIds },
+      },
+      select: { id: true },
+    });
+  }
+
+  hardDeleteFolderRow(org: string, id: string) {
+    return this._mediaFolder.model.mediaFolder.delete({
+      where: {
+        id,
+        organizationId: org,
+      },
+    });
+  }
+
   softDeleteFolders(org: string, folderIds: string[]) {
     return this._mediaFolder.model.mediaFolder.updateMany({
       where: {
