@@ -1,11 +1,12 @@
 'use client';
 
-import { FC } from 'react';
+import { FC, MouseEvent } from 'react';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 
 export const CommentCountBadge: FC<{
   count: number;
-}> = ({ count }) => {
+  onClick?: (e: MouseEvent) => void;
+}> = ({ count, onClick }) => {
   const t = useT();
 
   if (!count) {
@@ -20,6 +21,14 @@ export const CommentCountBadge: FC<{
         'comment_count_tooltip',
         'Number of comments on this post'
       )}
+      onClick={
+        onClick
+          ? (e) => {
+              e.stopPropagation();
+              onClick(e);
+            }
+          : undefined
+      }
     >
       <svg
         width="10"

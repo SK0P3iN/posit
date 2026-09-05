@@ -1093,7 +1093,7 @@ const CalendarItem: FC<{
         </div>
       )}
       {post.mediaMissing && <MediaMissingBadge />}
-      <CommentCountBadge count={post.commentsCount || 0} />
+      <CommentCountBadge count={post.commentsCount || 0} onClick={preview} />
       {showCreationMethodBadge && (
         <div className="absolute -bottom-[4px] -right-[4px] z-10">
           <CreationMethodBadge
