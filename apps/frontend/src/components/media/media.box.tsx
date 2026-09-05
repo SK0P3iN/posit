@@ -940,6 +940,37 @@ export const MediaBox: FC<{
     !isLoading && !filteredResults.length && !isTrashView;
   const showEmptyTrash = isTrashView && !trashResults.length && !trashFolders.length;
 
+  const hasSelectableItems = isTrashView
+    ? trashResults.length > 0 || trashFolders.length > 0
+    : filteredResults.length > 0;
+
+  const allVisibleSelected = isTrashView
+    ? hasSelectableItems &&
+      trashResults.every((media: Media) => trashSelectedMedia.includes(media.id)) &&
+      trashFolders.every((folder: MediaFolder) =>
+        trashSelectedFolders.includes(folder.id)
+      )
+    : hasSelectableItems &&
+      filteredResults.every((media: Media) => bulkSelected.includes(media.id));
+
+  const toggleSelectAll = useCallback(() => {
+    if (isTrashView) {
+      if (allVisibleSelected) {
+        setTrashSelectedMedia([]);
+        setTrashSelectedFolders([]);
+      } else {
+        setTrashSelectedMedia(trashResults.map((media: Media) => media.id));
+        setTrashSelectedFolders(trashFolders.map((folder: MediaFolder) => folder.id));
+      }
+      return;
+    }
+    if (allVisibleSelected) {
+      setBulkSelected([]);
+    } else {
+      setBulkSelected(filteredResults.map((media: Media) => media.id));
+    }
+  }, [isTrashView, allVisibleSelected, trashResults, trashFolders, filteredResults]);
+
   const renderMediaTile = (media: Media, options?: { trash?: boolean }) => {
     const isTrash = options?.trash;
     const isAttachSelected = !!selected.find((item) => item.id === media.id);
@@ -1137,6 +1168,20 @@ export const MediaBox: FC<{
                 </button>
               </>
             )}
+          </div>
+        )}
+
+        {standalone && hasSelectableItems && (
+          <div>
+            <button
+              type="button"
+              onClick={toggleSelectAll}
+              className="h-[34px] px-[12px] rounded-[8px] bg-newColColor text-[12px] font-[600]"
+            >
+              {allVisibleSelected
+                ? t('deselect_all', 'Deselect all')
+                : t('select_all', 'Select all')}
+            </button>
           </div>
         )}
 
